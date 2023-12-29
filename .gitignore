@@ -1,0 +1,11 @@
+dateTimeParse.py
+wikidataparsetext.json
+wikiarticles.py
+wikihtml.html
+wikihtmlparser.py
+writetoc.py
+wikitextproctext.py
+__pycache__/temporalParse.cpython-311.pyc
+__pycache__/wikiarticles.cpython-39.pyc
+Tests/htmltest.html
+Tests/textconv.md
