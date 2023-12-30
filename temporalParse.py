@@ -25,6 +25,12 @@ class TemporalParser:
         self.LIST_TYPE_BULLETED = "BULLETED"
         self.LIST_TYPE_NUMBERED = "NUMBERED"
         self.LIST_TYPE_INDENTED = "INDENTED"
+        
+        self.p = re.compile(r'\[\d+\]')
+
+        self.nlp = spacy.load("en_core_web_trf")
+
+    def reset_parser(self):
         self.saveSections = []
         self.sectionLinks = []
         self.sectionEvents = []
@@ -37,15 +43,15 @@ class TemporalParser:
         self.currentRow = []
         self.rowSpan = []
         self.processingTable = False
-        self.p = re.compile(r'\[\d+\]')
-
-        self.nlp = spacy.load("en_core_web_trf")
 
     def parse(self, soup):
+        self.reset_parser()
         self.soup = soup
-        self.soup.find(id="References").findParent(name="section").clear()
-        self.soup.find(id="External_links").findParent(name="section").clear()
-        self.generateSection(self.TYPE_TITLE, self.soup.find_all("title")[0].string)
+        if (self.soup.find(id="References")):
+            self.soup.find(id="References").findParent(name="section").clear()
+        if (self.soup.find(id="External_links")):
+            self.soup.find(id="External_links").findParent(name="section").clear()
+        #self.generateSection(self.TYPE_TITLE, self.soup.find_all("title")[0].string)
 
         for bodychild in self.soup.find('body').children:
             self.parseNodes(bodychild)
@@ -155,6 +161,15 @@ class TemporalParser:
         return ""
     
     def parseTable(self, table):
+        """
+        For each section below the <table> tag go through and parse
+        after resetting the table collections
+        
+        Args:
+            table (TableElement): The table element to be parsed.
+        
+        Returns: None
+        """
         self.tableHeader = []
         self.tableRows = []
         self.currentRow = []
@@ -171,6 +186,16 @@ class TemporalParser:
         print(nodeSection)
     
     def parseTablePart(self, node):
+        """
+        Parses, thead, tbody, tr by iteratively calling iself then  th, td by using the parse children method
+        rows that are are divided to give each row it's own value
+
+        Parameters:
+            node (Node): The node representing the table part to be parsed.
+
+        Returns:
+            None
+        """
         if (node.name == "thead" or node.name == "tbody"):
             for sectionChild in node.children:
                 self.parseTablePart(sectionChild)
@@ -199,6 +224,11 @@ class TemporalParser:
                 self.currentRow = []
 
     def parseEvents(self):
+        """
+        Iterates over all the sections in an the parse object and generates the events for each
+        Parameters: None
+        Returns: None
+        """
         for idx, section in enumerate(self.saveSections):
             if (section['type'] == self.TYPE_TABLE):
                 for rowIdx, row in enumerate(section['rows']):
@@ -226,6 +256,14 @@ class TemporalParser:
 
 
     def extract_events_spacy(self, text, idx, rowIdx=None, columnIdx=None):
+        """
+    	Extracts date time events using the Spacy library.
+    	
+    	:param text: The text to extract events from.
+    	:param idx: The index of the event.
+    	:param rowIdx: The row index.
+    	:param columnIdx: The column index.
+    	"""
 
         doc = self.nlp(text)
         for ent in filter(lambda e: e.label_ == 'DATE', doc.ents):
