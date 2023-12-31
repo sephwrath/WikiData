@@ -64,8 +64,7 @@ CREATE TABLE `article_section` (
     `section_id` int unsigned NOT NULL, -- not auto generated so it can be used to check the number of sections easily
     `tag` varchar(40) NOT NULL,
     `text` varchar(15000),
-    PRIMARY KEY (`section_id`, `article_id`),
-    UNIQUE KEY `as_index_UNIQUE` (`section_id`),
+    PRIMARY KEY (`article_id`,`section_id`),
     INDEX `article_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID)
 );
@@ -73,13 +72,14 @@ CREATE TABLE `article_section` (
 
 
 CREATE TABLE `article_section_table` (
+    `id` int unsigned NOT NULL AUTO_INCREMENT,
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL,
     `row_idx` int unsigned NOT NULL, -- a row index of 0 means there is a header otherwise the table starts at row 1
     `column_idx` int unsigned NOT NULL,
     `text` varchar(1000),
-    PRIMARY KEY (`article_id`, `section_id`, `row_idx`, `column_idx`),
-    INDEX `article_section_id_idx` (`article_id`, `section_id`),
+    PRIMARY KEY (`id`),
+    INDEX `article_section_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
     FOREIGN KEY (section_id) REFERENCES article_section(section_id)
 );
@@ -87,6 +87,7 @@ CREATE TABLE `article_section_table` (
 
 
 CREATE TABLE `article_section_link` (
+    `id` int unsigned NOT NULL AUTO_INCREMENT,
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL,
     `row_idx` int unsigned,
@@ -94,7 +95,7 @@ CREATE TABLE `article_section_link` (
     `start_pos` int NOT NULL, -- the index into the text where the link starts
     `end_pos` int NOT NULL, -- the index into the text where the link ends
     `link` varchar(1000) NOT NULL,
-    PRIMARY KEY (`article_id`, `section_id`),
+    PRIMARY KEY (`id`),
     INDEX `article_section_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
     FOREIGN KEY (section_id) REFERENCES article_section(section_id)
@@ -109,12 +110,12 @@ CREATE TABLE `parsed_event` (
     `section_id` int unsigned NOT NULL,
     `row_idx` int unsigned,
     `column_idx` int unsigned,
-    `start_date` bigint NOT NULL, -- 13 billion * secs in year = 4.1002e+17 seconds since the big bang < 1.8447e+19 (big int unsigned max)
-    `end_date` bigint NOT NULL,
+    `start_date` bigint, -- 13 billion * secs in year = 4.1002e+17 seconds since the big bang < 1.8447e+19 (big int unsigned max)
+    `end_date` bigint,
     `date_text` varchar(200),
     `start_pos` int NOT NULL, -- the index into the text where the date value starts
     `end_pos` int NOT NULL, -- the index into the text where the data value ends
-    `display_text` varchar(500) NOT NULL,
+    `display_text` varchar(500),
     PRIMARY KEY (`id`),
     UNIQUE KEY `pe_index_UNIQUE` (`id`),
     INDEX `article_id_idx` (`article_id`),

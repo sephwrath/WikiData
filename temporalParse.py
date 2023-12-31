@@ -43,6 +43,7 @@ class TemporalParser:
         self.currentRow = []
         self.rowSpan = []
         self.processingTable = False
+        self.row_cnt = 0
 
     def parse(self, soup):
         self.reset_parser()
@@ -61,9 +62,9 @@ class TemporalParser:
         self.currentSection == None
         nodeSection =  { 'type': type, 'text': text }
     
-        if (nodeSection):
+        if (nodeSection and text != ""):
             self.saveSections.append(nodeSection)
-        print(nodeSection)
+        #print(nodeSection)
 
     def generateLinkText(self, linkNode):
         strippedText = linkNode.text.strip()
@@ -139,8 +140,8 @@ class TemporalParser:
 
         elif (node.name == "ul" or node.name == "ol" or node.name == "dl"):
             nodeText = self.parseChildren(node)
-            if nodeText != "":
-                self.generateSection(self.TYPE_LIST, nodeText)
+            #if nodeText != "":
+            self.generateSection(self.TYPE_LIST, nodeText)
 
         elif (node.name == "li" or node.name == "dt" or node.name == "dd"):
             return self.parseChildren(node, " - ", "\n")
@@ -175,6 +176,7 @@ class TemporalParser:
         self.currentRow = []
         self.rowSpan = []
         self.processingTable = True
+        self.row_cnt = 0
         for sectionChild in table.children:
             self.parseTablePart(sectionChild)
 
@@ -202,12 +204,14 @@ class TemporalParser:
         elif (node.name == "tr"):
             for sectionChild in node.children:
                 self.parseTablePart(sectionChild)
-
+                self.row_cnt += 1
         elif (node.name == "th"):
             self.tableHeader.append( self.parseChildren(node))
-            self.rowSpan.append(0)
+            if (self.row_cnt == 0):
+                self.rowSpan.append(0)
         elif (node.name == "td"):
-            
+            if (self.row_cnt == 0):
+                self.rowSpan.append(0)
             while self.rowSpan[len(self.currentRow) ] > 1 :
                 self.rowSpan[len(self.currentRow) ] -= 1
                 self.currentRow.append(self.tableRows[-1][len(self.currentRow) ])
@@ -274,22 +278,23 @@ class TemporalParser:
                 self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
                 print('Event Discarded: ' + ent.text)
             else:
-                current = ent.root
-                desc = ""
-                while current.dep_ != "ROOT":
-                    current = current.head
-                    desc = " ".join(filter(None, [
-                        self.dep_subtree(current, "nsubj"),
-                        self.dep_subtree(current, "nsubjpass"),
-                        self.dep_subtree(current, "auxpass"),
-                        self.dep_subtree(current, "amod"),
-                        self.dep_subtree(current, "det"),
-                        current.text,
-                        self.dep_subtree(current, "acl"),
-                        self.dep_subtree(current, "dobj"),
-                        self.dep_subtree(current, "attr"),
-                        self.dep_subtree(current, "advmod")]))
-                self.generateEvent(idx, rowIdx, columnIdx, start, ent.start_char, ent.end_char, ent.text, desc)
+                self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
+                # current = ent.root
+                # desc = ""
+                # while current.dep_ != "ROOT":
+                #     current = current.head
+                #     desc = " ".join(filter(None, [
+                #         self.dep_subtree(current, "nsubj"),
+                #         self.dep_subtree(current, "nsubjpass"),
+                #         self.dep_subtree(current, "auxpass"),
+                #         self.dep_subtree(current, "amod"),
+                #         self.dep_subtree(current, "det"),
+                #         current.text,
+                #         self.dep_subtree(current, "acl"),
+                #         self.dep_subtree(current, "dobj"),
+                #         self.dep_subtree(current, "attr"),
+                #         self.dep_subtree(current, "advmod")]))
+                # self.generateEvent(idx, rowIdx, columnIdx, start, ent.start_char, ent.end_char, ent.text, desc)
         return
 
 
