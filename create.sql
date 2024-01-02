@@ -89,7 +89,7 @@ CREATE TABLE `article_section_table_cell` (
     `column_idx` int unsigned NOT NULL,
     `column_span` int unsigned,
     `row_span` int unsigned,
-    `text` varchar(1000),
+    `text` varchar(5000),
     PRIMARY KEY (`row_id`, `column_idx`),
     INDEX `row_id_idx` (`row_id`),
     FOREIGN KEY (row_id) REFERENCES article_section_table_row(ID)

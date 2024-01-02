@@ -60,7 +60,7 @@ def extract_file_articles(file_path, mycursor, mydb):
     insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
     insert_article_section = "INSERT INTO article_section (article_id, section_id, `tag`, `text`) VALUES (%s, %s, %s, %s)"
     insert_article_section_table_row = "INSERT INTO article_section_table_row (article_id, section_id, row_idx, row_type) values (%s, %s, %s, %s)"
-    insert_article_section_table_cell = "INSERT INTO article_section_table_cell (row_id, column_idx, column_span, text) VALUES (%s,%s, %s, %s)"
+    insert_article_section_table_cell = "INSERT INTO article_section_table_cell (row_id, column_idx, column_span, row_span, text) VALUES (%s,%s,%s, %s, %s)"
     insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link) values (%s, %s, %s, %s, %s, %s, %s);"
     insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
         
@@ -119,7 +119,7 @@ def extract_file_articles(file_path, mycursor, mydb):
 
                     parsed_html = BeautifulSoup(raw_html, features="html.parser")
                                        
-                    temporParse.parse(parsed_html)
+                    temporParse.parse(parsed_html, title)
                     temporParse.parseEvents()
                     print("parsing: {}, sections {}, events {}, links {}".format(title, len(temporParse.saveSections), len(temporParse.sectionEvents), len(temporParse.sectionLinks)))
 
@@ -151,9 +151,10 @@ def extract_file_articles(file_path, mycursor, mydb):
                                     mycursor.execute(insert_article_section_table_row, (article_id, sec_idx, row_idx, row[0]))
                                     new_row_id = mycursor.lastrowid
                                     for (col_idx, col) in enumerate(row[1]):
-                                        # (article_id, section_id, row_idx, column_idx, column_span, text)
-                                        span = col[1] if col[1] > 1 else None
-                                        insert_table_columns.append((new_row_id, col_idx, span, col[0]))
+                                        # (article_id, section_id, row_idx, column_idx, column_span, row_span, text)
+                                        col_span = col[1] if col[1] > 1 else None
+                                        row_span = col[2] if col[2] > 1 else None
+                                        insert_table_columns.append((new_row_id, col_idx, col_span, row_span, col[0]))
                             
                             
                         if len(insert_table_columns) > 0:
