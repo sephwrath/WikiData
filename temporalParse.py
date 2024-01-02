@@ -38,12 +38,13 @@ class TemporalParser:
         self.linkOffset = 0
         self.soup = None
         self.currentSection = None
-        self.tableHeader = []
         self.tableRows = []
         self.currentRow = []
         self.rowSpan = []
         self.processingTable = False
         self.row_cnt = 0
+        # set a context for some of the items - depending on what a parent is we might generate different strings
+        self.parent_context = None
 
     def parse(self, soup):
         self.reset_parser()
@@ -106,6 +107,7 @@ class TemporalParser:
                 return ""
             return node.text.strip()
         if (node.name == "p"):
+            self.parent_context = self.TYPE_PARAGRAPH
             self.currentSection = self.TYPE_PARAGRAPH
             for bodychild in node.children:
                 
@@ -118,10 +120,10 @@ class TemporalParser:
         elif (node.name == "a"):
             return self.generateLinkText(node)
         
-        elif (node.name == "b"):
+        elif (node.name == "b" or node.name == "strong"):
             return self.parseChildren(node, "**", "**")
         
-        elif (node.name == "i"):
+        elif (node.name == "i" or node.name == "em"):
             return self.parseChildren(node, "*", "*")
             
         elif (node.name == "h2"):
@@ -133,15 +135,20 @@ class TemporalParser:
         elif (node.name == "h4"):
             self.generateSection(self.TYPE_SUB_SUBTITLE, node.text.strip())
 
-        elif (node.name == "section" or node.name == "span"):
+        elif (node.name == "section"):
             nodeText = self.parseChildren(node)
             #if nodeText != "":
             #    self.generateSection(self.TYPE_PARAGRAPH, nodeText)
+        elif (node.name == "span" or node.name == "abbr" or node.name == "u" or node.name == "div"):
+            return self.parseChildren(node)
 
         elif (node.name == "ul" or node.name == "ol" or node.name == "dl"):
             nodeText = self.parseChildren(node)
-            #if nodeText != "":
-            self.generateSection(self.TYPE_LIST, nodeText)
+            if (self.parent_context == self.TYPE_PARAGRAPH):
+                #if nodeText != "":
+                self.generateSection(self.TYPE_LIST, nodeText)
+            else:
+                return nodeText
 
         elif (node.name == "li" or node.name == "dt" or node.name == "dd"):
             return self.parseChildren(node, " - ", "\n")
@@ -150,9 +157,10 @@ class TemporalParser:
             return self.parseChildren(node, " > ")
         
         elif (node.name == "table"):
-            if "infobox" in node.attrs['class']:
+            if 'class' in node.attrs and "infobox" in node.attrs['class']:
                 return ""
             else: 
+                self.parent_context = self.TYPE_TABLE
                 self.parseTable(node)
         elif (node.name == "img"):
             return ""
@@ -171,26 +179,59 @@ class TemporalParser:
         
         Returns: None
         """
-        self.tableHeader = []
         self.tableRows = []
         self.currentRow = []
+        self.currentColIdx = 0
         self.rowSpan = []
         self.processingTable = True
         self.row_cnt = 0
+        self.row_type = None
+        self.caption = None
+        self.empty_row = True
+        self.empty_rows = []
         for sectionChild in table.children:
             self.parseTablePart(sectionChild)
 
-        nodeSection =  { 'type': self.TYPE_TABLE, 'headder': self.tableHeader, 'rows': self.tableRows }
+        # remove empty rows
+        self.tableRows =[row for (i,row) in enumerate(self.tableRows) if i in self.empty_rows]
     
-        if (nodeSection):
+        nodeSection =  { 'type': self.TYPE_TABLE, 'rows': self.tableRows, 'text': self.caption }
+        if (len(self.tableRows) > 0):
             self.saveSections.append(nodeSection)
         self.processingTable = False
         print(nodeSection)
+
+    def extendRowSpan(self, node):
+        """
+        rowSpan array is used to track how many rows need to be populated with the original value so that
+        at the end of the process each row has it's each value in the table - this is required to make sure
+        that each row has access to a value for each column
+
+        Args:
+            node: The node representing the table cell.
+
+        Returns: None
+        """
+        if ('colspan' in node.attrs):
+            self.rowSpan.extend([0 for x in range(int(node.attrs['colspan']))])
+        else:
+            self.rowSpan.append(0)
+
+    def appendTableColumn(self, node, cell_text):
+        # handle column spans
+        columnSpan = int(node.attrs['colspan']) if 'colspan' in node.attrs and node.attrs['colspan'].isdigit() else 1
+
+        #cell_text = self.parseChildren(node)
+        if (cell_text != ""):
+            self.empty_row = False
+        self.currentRow.append((cell_text, columnSpan))
+        self.currentColIdx += columnSpan
+        return columnSpan
     
     def parseTablePart(self, node):
         """
         Parses, thead, tbody, tr by iteratively calling iself then  th, td by using the parse children method
-        rows that are are divided to give each row it's own value
+        rows that are are spaned are divided to give each row it's own value
 
         Parameters:
             node (Node): The node representing the table part to be parsed.
@@ -204,28 +245,65 @@ class TemporalParser:
         elif (node.name == "tr"):
             for sectionChild in node.children:
                 self.parseTablePart(sectionChild)
-                self.row_cnt += 1
-        elif (node.name == "th"):
-            self.tableHeader.append( self.parseChildren(node))
-            if (self.row_cnt == 0):
-                self.rowSpan.append(0)
-        elif (node.name == "td"):
-            if (self.row_cnt == 0):
-                self.rowSpan.append(0)
-            while self.rowSpan[len(self.currentRow) ] > 1 :
-                self.rowSpan[len(self.currentRow) ] -= 1
-                self.currentRow.append(self.tableRows[-1][len(self.currentRow) ])
             
-            self.currentRow.append(self.parseChildren(node))
-            if 'rowspan' in node.attrs:
-                self.rowSpan[len(self.currentRow) - 1] = int(node.attrs['rowspan'])
-            else:
-                self.rowSpan[len(self.currentRow) - 1] = 1
+            # if the row ends with only spanned columns they will need to be appended after the last td/th
+            self.checkForSpannedColumns()
+            # once the row is complete add it to the list
+            if (self.empty_row):
+                self.empty_rows.append(self.row_cnt)
+            self.tableRows.append((self.row_type, self.currentRow))
+            self.currentRow = []
+            self.currentColIdx = 0
+            self.empty_row = True
+            self.row_cnt += 1
+        elif (node.name == "th"):
+            self.row_type = 'th'
+            self.appendTableColumn(node, self.parseChildren(node))
+            if (self.row_cnt == 0):
+                self.extendRowSpan(node)
+        elif (node.name == "caption"):
+            self.caption = self.parseChildren(node)
+        elif (node.name == "td"):
+            self.row_type = 'td'
+            if (self.row_cnt == 0):
+                self.extendRowSpan(node)
 
-            # if we have a complete row append
-            if (len(self.currentRow) >= len(self.tableHeader)):
-                self.tableRows.append(self.currentRow)
-                self.currentRow = []
+            self.checkForSpannedColumns()
+            
+            row_idx_s = self.currentColIdx
+            column_span = self.appendTableColumn(node, self.parseChildren(node))
+
+            # initialise the rowspan counter taking into account that multiple columns might be spanned
+            row_idx_e = row_idx_s + column_span
+            rs_val = int(node.attrs['rowspan']) if 'rowspan' in node.attrs and node.attrs['rowspan'].isdigit() else 1
+
+            self.rowSpan[row_idx_s : row_idx_e] = [rs_val for a in self.rowSpan[row_idx_s : row_idx_e]]
+
+    def checkForSpannedColumns(self):
+        # if the previous row cell has a rowspan 
+        while len(self.rowSpan) > self.currentColIdx and self.rowSpan[self.currentColIdx ] > 1 :
+            prev_row = self.tableRows[-1][1]
+            # get the prev row cell index
+            prev_row_idx = 0
+            prev_row_span = 0
+            for col in prev_row:
+                prev_row_span += col[1]
+                prev_row_idx +=1
+                if (prev_row_span >= self.currentColIdx):
+                    break
+                
+            
+            prev_row_cell = prev_row[prev_row_idx]
+            # get the value from the previous row
+            self.currentRow.append(prev_row_cell)
+
+            new_cell_span = prev_row_cell[1]
+
+            row_idx_e = self.currentColIdx + new_cell_span 
+
+            self.rowSpan[self.currentColIdx : row_idx_e] = [a-1 for a in self.rowSpan[self.currentColIdx: row_idx_e]]
+            self.currentColIdx += new_cell_span
+                
 
     def parseEvents(self):
         """
@@ -236,8 +314,9 @@ class TemporalParser:
         for idx, section in enumerate(self.saveSections):
             if (section['type'] == self.TYPE_TABLE):
                 for rowIdx, row in enumerate(section['rows']):
-                    for columnIdx, cell in enumerate(row):
-                        self.extract_events_spacy(cell, idx, rowIdx, columnIdx)
+                    for columnIdx, cell in enumerate(row[1]):
+                        if (len(cell[0]) > 2):
+                            self.extract_events_spacy(cell[0], idx, rowIdx, columnIdx)
             else:
                 self.extract_events_spacy(str(section["text"]), idx)
 

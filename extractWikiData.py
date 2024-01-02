@@ -54,10 +54,13 @@ def get_last_inserted_dump_details(mycursor):
         
     return (dump_index, dump_files)
 
+
+
 def extract_file_articles(file_path, mycursor, mydb):
     insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
     insert_article_section = "INSERT INTO article_section (article_id, section_id, `tag`, `text`) VALUES (%s, %s, %s, %s)"
-    insert_article_section_table = "INSERT INTO article_section_table (article_id, section_id, row_idx, column_idx, text) VALUES (%s, %s, %s, %s, %s)"
+    insert_article_section_table_row = "INSERT INTO article_section_table_row (article_id, section_id, row_idx, row_type) values (%s, %s, %s, %s)"
+    insert_article_section_table_cell = "INSERT INTO article_section_table_cell (row_id, column_idx, column_span, text) VALUES (%s,%s, %s, %s)"
     insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link) values (%s, %s, %s, %s, %s, %s, %s);"
     insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
         
@@ -132,29 +135,29 @@ def extract_file_articles(file_path, mycursor, mydb):
                     if not no_events:
                         # insert the article sections
                         insert_sections = []
-                        insert_section_tables = []
+                        insert_table_rows = []
+                        insert_table_columns = []
                         for (sec_idx, section) in enumerate(temporParse.saveSections):
                             # (article_id, section_id `tag`, `text`)
                             #{ 'type': type, 'text': text }
-                            section_text = None
+                            section_text = section['text']
+                            mycursor.execute(insert_article_section, (article_id, sec_idx, section['type'], section_text))
                             if (section['type'] == temporParse.TYPE_TABLE):
-                                # table section = { 'type': self.TYPE_TABLE, 'headder': self.tableHeader, 'rows': self.tableRows }
-                                for (hddr_idx, hddr_col) in enumerate(temporParse.section['headder']):
-                                    # (article_id, section_id, row_idx, column_idx, text)
-                                    insert_section_tables.append((article_id, sec_idx, 0, hddr_idx, hddr_col))
-                                for (row_idx, row) in enumerate(temporParse.section['rows']):
-                                    for (col_idx, col) in enumerate(row):
-                                        # (article_id, section_id, row_idx, column_idx, text)
-                                        insert_section_tables.append((article_id, sec_idx, row_idx, col_idx, col))
-                            else:
-                                section_text = section['text']
+                                # table section = { 'type': self.TYPE_TABLE, 'rows': self.tableRows }                                
+                                for (row_idx, row) in enumerate(section['rows']):
+                                    #(id, article_id, section_id, row_idx, row_type)
+                                    #insert_table_rows.append()
+                                    # neet to execute for each row to get the row id.
+                                    mycursor.execute(insert_article_section_table_row, (article_id, sec_idx, row_idx, row[0]))
+                                    new_row_id = mycursor.lastrowid
+                                    for (col_idx, col) in enumerate(row[1]):
+                                        # (article_id, section_id, row_idx, column_idx, column_span, text)
+                                        span = col[1] if col[1] > 1 else None
+                                        insert_table_columns.append((new_row_id, col_idx, span, col[0]))
                             
-                            insert_sections.append((article_id, sec_idx, section['type'], section_text))
-
-                        if len(insert_sections) > 0:
-                            mycursor.executemany(insert_article_section, insert_sections)
-                        if len(insert_section_tables) > 0:
-                            mycursor.executemany(insert_article_section_table, insert_section_tables)
+                            
+                        if len(insert_table_columns) > 0:
+                            mycursor.executemany(insert_article_section_table_cell, insert_table_columns)
                         
                         section_links = []
                         for link in temporParse.sectionLinks:

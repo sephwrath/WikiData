@@ -27,7 +27,8 @@ ALTER TABLE wikipageindex MODIFY title VARCHAR(400) CHARACTER SET utf8mb4 COLLAT
 ALTER TABLE wikipageindex CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 drop table parsed_event;
-drop table article_section_table;
+drop table article_section_table_row;
+drop table article_section_table_cell;
 drop table article_section_link;
 drop table article_section;
 drop table article;
@@ -70,18 +71,28 @@ CREATE TABLE `article_section` (
 );
 
 
-
-CREATE TABLE `article_section_table` (
+CREATE TABLE `article_section_table_row` (
     `id` int unsigned NOT NULL AUTO_INCREMENT,
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL,
-    `row_idx` int unsigned NOT NULL, -- a row index of 0 means there is a header otherwise the table starts at row 1
-    `column_idx` int unsigned NOT NULL,
-    `text` varchar(1000),
+    `row_idx` int NOT NULL,
+    `row_type` varchar(4),
     PRIMARY KEY (`id`),
     INDEX `article_section_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
     FOREIGN KEY (section_id) REFERENCES article_section(section_id)
+);
+
+
+CREATE TABLE `article_section_table_cell` (
+    `row_id` int unsigned NOT NULL,
+    `column_idx` int unsigned NOT NULL,
+    `column_span` int unsigned,
+    `row_span` int unsigned,
+    `text` varchar(1000),
+    PRIMARY KEY (`row_id`, `column_idx`),
+    INDEX `row_id_idx` (`row_id`),
+    FOREIGN KEY (row_id) REFERENCES article_section_table_row(ID)
 );
 
 
