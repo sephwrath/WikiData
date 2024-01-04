@@ -6,6 +6,7 @@ import html2text
 from bs4 import BeautifulSoup
 import re
 import datetime as dt
+import time
 
 
 
@@ -54,7 +55,19 @@ def get_last_inserted_dump_details(mycursor):
         
     return (dump_index, dump_files)
 
+def get_article_count(file_path,mycursor):
+    prev_run_df = get_last_inserted_dump_details(mycursor)
 
+    with tarfile.open(file_path, mode="r:gz") as tf:
+        # load the member info from the colum as using get members requires reading the whole tarfile
+        
+
+        for file_rec in prev_run_df[1]:
+            member = tarfile.TarInfo.frombuf(file_rec[2], tarfile.ENCODING, 'surrogateescape')
+            with tf.extractfile(member) as file_input:
+                num_lines = sum(1 for _ in file_input)
+
+            print("{} articles in {}".format(num_lines, file_rec[1]))
 
 def extract_file_articles(file_path, mycursor, mydb):
     insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
@@ -69,6 +82,12 @@ def extract_file_articles(file_path, mycursor, mydb):
 
     prev_run_df = get_last_inserted_dump_details(mycursor)
 
+    # timing variables
+    t_count = 0
+    t_total = 0
+    t_s = 0
+    t_e = 0
+
     with tarfile.open(file_path, mode="r:gz") as tf:
         for file_rec in prev_run_df[1]:
             # load the member info from the colum as using get members requires reading the whole tarfile
@@ -81,7 +100,8 @@ def extract_file_articles(file_path, mycursor, mydb):
                     # skip until we catch up to the last inserted article
                     if (idx <= prev_run_df[0]):
                         continue
-
+                    
+                    t_s = time.time()
                     # for the first line remove the header - the headder starts with the file name
                     if (line.startswith(file_rec[1].encode('ascii'))):
                         line = line[len(file_rec[2]):]
@@ -106,15 +126,16 @@ def extract_file_articles(file_path, mycursor, mydb):
                     now_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
                     # easiest way to check for redirects is to see if there is a #REDIRECT in the wikitext
-                    wikiText = article["article_body"]["wikitext"]
-                    redirects = re.findall(r'#REDIRECT\[\[(.*)\]\]', wikiText)
-                    if len(redirects) > 0:
-                        print("parsing: {}, redirects {}".format(title, redirects))
-                        redirect = redirects[0]
-                        insert_values = (title, now_time, file_rec[0], idx, url, redirect, no_events)
-                        mycursor.execute(insert_article, insert_values)
-                        mydb.commit()
-                        continue
+                    if "wikitext" in article["article_body"]:
+                        wikiText = article["article_body"]["wikitext"]
+                        redirects = re.findall(r'#REDIRECT\[\[(.*)\]\]', wikiText)
+                        if len(redirects) > 0:
+                            print("parsing: {}, redirects {}".format(title, redirects))
+                            redirect = redirects[0]
+                            insert_values = (title, now_time, file_rec[0], idx, url, redirect, no_events)
+                            mycursor.execute(insert_article, insert_values)
+                            mydb.commit()
+                            continue
 
 
                     parsed_html = BeautifulSoup(raw_html, features="html.parser")
@@ -186,6 +207,14 @@ def extract_file_articles(file_path, mycursor, mydb):
                             
                     mydb.commit()
 
+                    t_e = time.time()
+                    t_tot = t_e - t_s
+                    t_count += 1
+                    t_total += t_tot
+                    t_avg = t_total / t_count
+                    print("title: {}, processing time: {}. Total time: {}, average time for {} articles: {}".format(title, t_tot, t_total, t_count, t_avg))
+
+
 
 if __name__ == "__main__":
     mydb = mysql.connector.connect(
@@ -202,6 +231,8 @@ if __name__ == "__main__":
     #extract_file_names(html_file_path, mycursor, mydb)
 
     extract_file_articles(html_file_path, mycursor, mydb)
+
+    #get_article_count(html_file_path, mycursor)
 
     
 

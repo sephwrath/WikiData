@@ -11,6 +11,7 @@ import spacy, re
 
 class TemporalParser:
     def __init__(self):
+        # if _EXT is added to the end then the section is an extension of the last section
         self.TYPE_MAIN_TITLE = "MAIN_TITLE"
         self.TYPE_MAIN_IMAGE_URL = "MAIN_IMAGE_URL"
         self.TYPE_TITLE = "TITLE"
@@ -25,6 +26,8 @@ class TemporalParser:
         self.LIST_TYPE_BULLETED = "BULLETED"
         self.LIST_TYPE_NUMBERED = "NUMBERED"
         self.LIST_TYPE_INDENTED = "INDENTED"
+
+
         
         self.p = re.compile(r'\[\d+\]')
 
@@ -59,25 +62,38 @@ class TemporalParser:
     def generateSection(self, type, text):
         self.linkOffset = 0
         self.currentSection == None
-        nodeSection =  { 'type': type, 'text': text }
+        # todo - make sure we don't split on a date - loop until we hit a  \n?
+        if (len(text) > 14090):
+            offset = 0
+            while (True):
+                self.saveSections.append({ 'type': type+"_EXT", 'text': text[offset:offset+ 14090] })
+
+                offset += 14090
+                if (offset >= len(text)):
+                    break
+
+        else:
+            nodeSection =  { 'type': type, 'text': text }
     
-        if (nodeSection and text != ""):
-            self.saveSections.append(nodeSection)
-        #print(nodeSection)
+            if (nodeSection and text != ""):
+                self.saveSections.append(nodeSection)
+            #print(nodeSection)
 
     def generateLinkText(self, linkNode):
         strippedText = linkNode.text.strip()
 
-        if not linkNode.attrs['href'].startswith("./File:"):
+        linkText = linkNode.attrs['href']
+        # don't include links to files or non existant pages
+        if not (linkText.startswith("./File:") or 'redlink=1' in linkText):
         
             if (self.parent_context == self.TYPE_TABLE):
                 self.sectionLinks.append({ 'section': len(self.saveSections)-1,
-                                   'article': linkNode.attrs['href'], 'start': (self.linkOffset + 1),
+                                   'article': linkText, 'start': (self.linkOffset + 1),
                                     'end': (self.linkOffset + len(strippedText) + 1),
                                     'column': len(self.currentRow), 'row': len(self.tableRows) } )
             else:
                 self.sectionLinks.append({ 'section': len(self.saveSections)-1,
-                                   'article': linkNode.attrs['href'], 'start': (self.linkOffset + 1),
+                                   'article': linkText, 'start': (self.linkOffset + 1),
                                     'end': (self.linkOffset + len(strippedText) + 1) } )
 
         return strippedText
@@ -119,10 +135,10 @@ class TemporalParser:
             return self.generateLinkText(node)
         
         elif (node.name == "b" or node.name == "strong"):
-            return self.parseChildren(node, "**", "**")
+            return self.parseChildren(node, " ** ", " ** ")
         
         elif (node.name == "i" or node.name == "em"):
-            return self.parseChildren(node, "*", "*")
+            return self.parseChildren(node, " * ", " * ")
             
         elif (node.name == "h2"):
             self.generateSection(self.TYPE_TITLE, node.text.strip())
@@ -191,7 +207,7 @@ class TemporalParser:
         if (len(self.tableRows) > 0):
             self.saveSections.append(nodeSection)
         self.parent_context = None
-        print(nodeSection)
+        #print(nodeSection)
 
     def appendTableColumn(self, node, cell_text):
         # handle column spans
@@ -277,15 +293,16 @@ class TemporalParser:
     	"""
 
         doc = self.nlp(text)
-        for ent in filter(lambda e: e.label_ == 'DATE', doc.ents):
+        for ent in filter(lambda e: e.label_ == 'DATE' or e.label_ == 'TIME', doc.ents):
+            self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
 
-            start = parse(ent.text)
-            if start == None:
+            #start = parse(ent.text)
+            #if start == None:
                 # could not parse the dates, hence ignore it
-                self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
-                print('Event Discarded: ' + ent.text)
-            else:
-                self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
+            #    self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
+                #print('Event Discarded: ' + ent.text)
+            #else:
+            #    self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
                 # current = ent.root
                 # desc = ""
                 # while current.dep_ != "ROOT":
