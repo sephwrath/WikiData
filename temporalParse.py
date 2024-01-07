@@ -101,7 +101,10 @@ class TemporalParser:
     def parseChildren(self, node, leading=None, trailing=None):
         nodeText = ""
         for sectionChild in node.children:
-            nodeText += self.parseNodes(sectionChild)
+            childText = self.parseNodes(sectionChild)
+            if len(nodeText) > 0 and len(childText) > 0 and not (nodeText[0].isspace() or childText[-1].isspace()):
+                nodeText += " "
+            nodeText += childText
             self.linkOffset = len(nodeText)
 
         if nodeText.strip() == "":

@@ -133,3 +133,13 @@ CREATE TABLE `parsed_event` (
     FOREIGN KEY (article_id) REFERENCES article(ID),
     FOREIGN KEY (section_id) REFERENCES article_Section(section_id) 
 );
+
+
+select * from article where id > 2000;
+
+SELECT * FROM wikidata.article_section where article_id = 75;
+
+select * from wikidata.parsed_event where article_id = 75;
+
+SELECT `table_name`, table_rows, ROUND((data_length + index_length) / 1024 / 1024, 1) "DB Size in MB" 
+FROM information_schema.tables;

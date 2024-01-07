@@ -113,13 +113,6 @@ def extract_file_articles(file_path, mycursor, mydb):
 
                     # replace dashes with hyphens - spacy doesn't recognize dashes
                     raw_html = raw_html.replace("–", "-")
-                    
-                    # text = ""
-                    # for line in raw_html:
-                    #     tempLine = line.replace("\\n", "\n").strip() + " "
-                    #     # replace double escaped characters
-                    #     tempLine = re.sub(r"(\\')", "'", tempLine)
-                    #     text += tempLine
 
                     no_events = True
                     redirect = None
