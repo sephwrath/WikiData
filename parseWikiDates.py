@@ -2,7 +2,16 @@ import mysql.connector
 
 import re
 import datetime as dt
-from ..DateParser.dt_rd_parser.parser import TimeParser
+
+
+# import requi9red module
+import sys
+ 
+# append the path of the
+# parent directory
+sys.path.append("C:/Users/stephen/Documents/Projects/date-finder/dt_rd_parser")
+
+from timeParser import TimeParser
 
 
 
@@ -13,6 +22,7 @@ def extract_dates_from_db(cursor, mydb):
         limit 1000;""")
     
     dates_to_parse = mycursor.fetchall()
+    time_parser = TimeParser()
 
     for date_rec in dates_to_parse:
         article_id = date_rec[0]
@@ -25,6 +35,9 @@ def extract_dates_from_db(cursor, mydb):
         
         print("article_id: ", article_id, " section_id: ", section_id, " row_idx: ", row_idx, " column_idx: ", column_idx, " date_text: ", date_text, " start_pos: ", start_pos, " end_pos: ", end_pos)
 
+        date = time_parser.parse(date_text)
+
+        print("result: " + str(date))
 
 
 
@@ -38,6 +51,4 @@ if __name__ == "__main__":
 
     mycursor = mydb.cursor()
 
-    #extract_file_names(html_file_path, mycursor, mydb)
-
-    extract_file_articles(html_file_path, mycursor, mydb)
+    extract_dates_from_db(mycursor, mydb)
