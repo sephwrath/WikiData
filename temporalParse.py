@@ -54,6 +54,7 @@ class TemporalParser:
             self.soup.find(id="References").findParent(name="section").clear()
         if (self.soup.find(id="External_links")):
             self.soup.find(id="External_links").findParent(name="section").clear()
+        # title is added as the first section
         self.generateSection(self.TYPE_TITLE, title)
 
         for bodychild in self.soup.find('body').children:
@@ -290,7 +291,7 @@ class TemporalParser:
     	Extracts date time events using the Spacy library.
     	
     	:param text: The text to extract events from.
-    	:param idx: The index of the event.
+    	:param idx: The section of the article.
     	:param rowIdx: The row index.
     	:param columnIdx: The column index.
     	"""

@@ -41,7 +41,10 @@ def extract_dates_from_db(cursor, mydb):
         print("article_id: ", article_id, " section_id: ", section_id, " row_idx: ", row_idx, " column_idx: ", column_idx, " date_text: ", date_text, " start_pos: ", start_pos, " end_pos: ", end_pos)
 
         try:
-            time_parser.set_refrence_date(last_article_date.to_datetime('start') if last_article_id == article_id else dt.datetime.now()) 
+            if last_article_id == article_id:
+                time_parser.set_refrence_date(last_article_date.to_datetime('start'), last_article_date.grain)
+            else:
+                time_parser.set_refrence_date(dt.datetime.now()) 
             date = time_parser.parse(date_text)
 
             # only commit after we have parsed all the dates in the article
@@ -61,21 +64,32 @@ def extract_dates_from_db(cursor, mydb):
 
 
         except Exception as e:
-            print(e.msg, " ", get_date_context(mycursor, article_id, section_id, row_idx, column_idx))
+            #msg = str(e)
+            #if (hasattr(e, 'msg')):
+            print(str(e), " ", get_date_context(mycursor, article_id, section_id, row_idx, column_idx))
+            #else:
+            #    raise (e)
 
 
 def get_date_context(cursor, article_id, section_id, row_idx, column_idx):
-    if row_idx and column_idx:
-        cursor.execute("""SELECT tc.text FROM wikidata.article_section_table_cell tc, wikidata.article_section_table_row tr
-            where tr.article_id = %s and tr.section_id = %s and tr.row_idx = %s and tr.id = tc.row_id and tc.column_idx = %s;""",
-            (article_id, section_id, row_idx, column_idx))
-        parseText = cursor.fetchall()
-        
-    else:
-        cursor.execute("""SELECT text FROM wikidata.article_section where article_id = %s and section_id = %s;""", 
-                     (article_id, section_id))
-        parseText = cursor.fetchall()
-    return parseText[0][0]
+    retVal = "No context available"
+    try:
+        if row_idx and column_idx:
+            cursor.execute("""SELECT tc.text FROM wikidata.article_section_table_cell tc, wikidata.article_section_table_row tr
+                where tr.article_id = %s and tr.section_id = %s and tr.row_idx = %s and tr.id = tc.row_id and tc.column_idx = %s;""",
+                (article_id, section_id, row_idx, column_idx))
+            parseText = cursor.fetchall()
+            
+        else:
+            cursor.execute("""SELECT text FROM wikidata.article_section where article_id = %s and section_id = %s;""", 
+                        (article_id, section_id))
+            parseText = cursor.fetchall()
+        retVal = parseText[0][0]
+
+    except Exception as e:
+        print(e)
+
+    return retVal
 
 if __name__ == "__main__":
     mydb = mysql.connector.connect(

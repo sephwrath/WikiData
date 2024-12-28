@@ -38,6 +38,8 @@ CREATE TABLE `dump_file` (
     id int unsigned NOT NULL AUTO_INCREMENT,
     file_name varchar(400) NOT NULL,
     tar_info blob(1000) NOT NULL,
+    offset bigint unsigned NOT NULL,
+    offset_data bigint unsigned NOT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `df_index_UNIQUE` (`id`)
 );
@@ -51,6 +53,8 @@ CREATE TABLE `article` (
     `url` varchar(600) NOT NULL,
     `redirect` varchar(600),
     `no_dates` boolean,
+    `wiki_update_ts` timestamp,
+    `err` varchar(30), -- either UP_TO_DATE, NEW_DUMP, PARSE_ERROR
     PRIMARY KEY (`id`),
     UNIQUE KEY `art_index_UNIQUE` (`id`),
     UNIQUE KEY `title_UNIQUE` (`title`),
@@ -123,6 +127,7 @@ CREATE TABLE `parsed_event` (
     `column_idx` int unsigned,
     `start_date` bigint, -- 13 billion * secs in year = 4.1002e+17 seconds since the big bang < 1.8447e+19 (big int unsigned max)
     `end_date` bigint,
+    `parse_status` int,
     `date_text` varchar(200),
     `start_pos` int NOT NULL, -- the index into the text where the date value starts
     `end_pos` int NOT NULL, -- the index into the text where the data value ends
