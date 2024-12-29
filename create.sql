@@ -27,6 +27,7 @@ ALTER TABLE wikipageindex MODIFY title VARCHAR(400) CHARACTER SET utf8mb4 COLLAT
 ALTER TABLE wikipageindex CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 drop table parsed_event;
+drop table article_section_ext_text
 drop table article_section_table_row;
 drop table article_section_table_cell;
 drop table article_section_link;
@@ -48,8 +49,8 @@ CREATE TABLE `article` (
     `id` int unsigned NOT NULL AUTO_INCREMENT,
     `title` varchar(400) NOT NULL,
     `update` datetime NOT NULL,
-    `dump_file_id` int unsigned NOT NULL,
-    `dump_idx` int unsigned NOT NULL,
+    `dump_file_id` int unsigned,
+    `dump_idx` int unsigned,
     `url` varchar(600) NOT NULL,
     `redirect` varchar(600),
     `no_dates` boolean,
@@ -69,6 +70,14 @@ CREATE TABLE `article_section` (
     `section_id` int unsigned NOT NULL, -- not auto generated so it can be used to check the number of sections easily
     `tag` varchar(40) NOT NULL,
     `text` varchar(15000),
+    `ext_text_id` int unsigned,
+
+    'parent_section_id' int unsigned,
+    `row_idx` int unsigned,
+    `column_idx` int unsigned,
+    `column_span` int unsigned,
+    `row_span` int unsigned,
+
     PRIMARY KEY (`article_id`,`section_id`),
     INDEX `article_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID)
@@ -91,12 +100,18 @@ CREATE TABLE `article_section_table_row` (
 CREATE TABLE `article_section_table_cell` (
     `row_id` int unsigned NOT NULL,
     `column_idx` int unsigned NOT NULL,
+    `article_id` int unsigned NOT NULL,
+    `section_id` int unsigned NOT NULL,
     `column_span` int unsigned,
     `row_span` int unsigned,
+    `ext_text_id` int unsigned,
     `text` varchar(10000),
     PRIMARY KEY (`row_id`, `column_idx`),
     INDEX `row_id_idx` (`row_id`),
-    FOREIGN KEY (row_id) REFERENCES article_section_table_row(ID)
+    INDEX `article_section_id_idx` (`article_id`),
+    FOREIGN KEY (row_id) REFERENCES article_section_table_row(ID),
+    FOREIGN KEY (article_id) REFERENCES article(ID),
+    FOREIGN KEY (section_id) REFERENCES article_section(section_id)
 );
 
 
@@ -110,6 +125,21 @@ CREATE TABLE `article_section_link` (
     `start_pos` int NOT NULL, -- the index into the text where the link starts
     `end_pos` int NOT NULL, -- the index into the text where the link ends
     `link` varchar(1000) NOT NULL,
+    PRIMARY KEY (`id`),
+    INDEX `article_section_id_idx` (`article_id`),
+    FOREIGN KEY (article_id) REFERENCES article(ID),
+    FOREIGN KEY (section_id) REFERENCES article_section(section_id)
+);
+
+-- table to contain any extended text that won't fit in cells or article sections
+CREATE TABLE `article_section_ext_text` (
+    `id` int unsigned NOT NULL AUTO_INCREMENT,
+    `article_id` int unsigned NOT NULL,
+    `section_id` int unsigned NOT NULL,
+    `row_idx` int unsigned,
+    `column_idx` int unsigned,
+    `ext_text_id` int unsigned,
+    `text` varchar(15000),
     PRIMARY KEY (`id`),
     INDEX `article_section_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),

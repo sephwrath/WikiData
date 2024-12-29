@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 import spacy, re
 #import en_core_web_trf
 
+# section [ type, text, links, events, parent]
 
 
 
@@ -18,6 +19,7 @@ class TemporalParser:
         self.TYPE_PARAGRAPH = "PARAGRAPH"
         self.TYPE_IMAGE = "IMAGE"
         self.TYPE_TABLE = "TABLE"
+        self.TYPE_TABLE_CELL = "TABLE_CELL"
         self.TYPE_QUOTE = "QUOTE"
         self.TYPE_SUBTITLE = "SUBTITLE"
         self.TYPE_SUB_SUBTITLE = "SUB_SUBTITLE"
@@ -28,7 +30,6 @@ class TemporalParser:
         self.LIST_TYPE_INDENTED = "INDENTED"
 
 
-        
         self.p = re.compile(r'\[\d+\]')
 
         self.nlp = spacy.load("en_core_web_trf")
@@ -37,12 +38,13 @@ class TemporalParser:
         self.saveSections = []
         self.sectionLinks = []
         self.sectionEvents = []
-        # track to number of characters for the current section so we know where the link should be inserted
+        # track to number of characters for the current section so we know where the link should be inserted - only tracks for one section
         self.linkOffset = 0
         self.soup = None
         self.currentSection = None
-        self.tableRows = []
-        self.currentRow = []
+        # variables for allowing table nesting possibly other nestings if required
+        self.nestingDepth = 0
+        self.tableCounts = {}
 
         # set a context for some of the items - depending on what a parent is we might generate different strings
         self.parent_context = None
@@ -55,30 +57,21 @@ class TemporalParser:
         if (self.soup.find(id="External_links")):
             self.soup.find(id="External_links").findParent(name="section").clear()
         # title is added as the first section
-        self.generateSection(self.TYPE_TITLE, title)
+        parent_section = self.generateSection(self.TYPE_TITLE, title)
 
-        for bodychild in self.soup.find('body').children:
-            self.parseNodes(bodychild)
+        self.parseChildren(self.soup.find('body'), parent_section, 0)
 
-    def generateSection(self, type, text):
+    def generateSection(self, type, parent_section = None, text=None):
         self.linkOffset = 0
         self.currentSection == None
-        # todo - make sure we don't split on a date - loop until we hit a  \n?
-        if (len(text) > 14090):
-            offset = 0
-            while (True):
-                self.saveSections.append({ 'type': type+"_EXT", 'text': text[offset:offset+ 14090] })
 
-                offset += 14090
-                if (offset >= len(text)):
-                    break
+        nodeSection =  { 'type': type, 'text': text, 'parent_section': parent_section, 'links': [], 'events': [] }
 
-        else:
-            nodeSection =  { 'type': type, 'text': text }
+        self.saveSections.append(nodeSection)
+        return len(self.saveSections) - 1
     
-            if (nodeSection and text != ""):
-                self.saveSections.append(nodeSection)
-            #print(nodeSection)
+    def setSectionText(self, sectionIndex, text):
+        self.saveSections[sectionIndex]['text'] = text
 
     def generateLinkText(self, linkNode):
         strippedText = linkNode.text.strip()
@@ -99,10 +92,10 @@ class TemporalParser:
 
         return strippedText
     
-    def parseChildren(self, node, leading=None, trailing=None):
+    def parseChildren(self, node, parent_section=None, leading=None, trailing=None):
         nodeText = ""
         for sectionChild in node.children:
-            childText = self.parseNodes(sectionChild)
+            childText = self.parseNodes(sectionChild, parent_section)
             if len(nodeText) > 0 and len(childText) > 0 and not (nodeText[0].isspace() or childText[-1].isspace()):
                 nodeText += " "
             nodeText += childText
@@ -117,8 +110,9 @@ class TemporalParser:
         self.linkOffset = len(nodeText)
         return nodeText
 
-    def parseNodes(self,node):
+    def parseNodes(self,node, parent_section=None):
         nodeText = ""
+        p_section = parent_section
         # print(node.name)
         if (node.name == None):
             if node.text.startswith("<span"):
@@ -127,131 +121,90 @@ class TemporalParser:
         if (node.name == "p"):
             self.parent_context = self.TYPE_PARAGRAPH
             self.currentSection = self.TYPE_PARAGRAPH
-            for bodychild in node.children:
-                
-                newText = self.parseNodes(bodychild)
-                if newText != "":
-                    nodeText += newText + " "
-                    self.linkOffset = len(nodeText)
-            self.generateSection(self.TYPE_PARAGRAPH,nodeText)
+            new_section = self.generateSection(self.TYPE_PARAGRAPH, p_section)
+            nodeText = self.parseChildren(node, new_section)
+            
+            self.setSectionText(new_section, nodeText)
 
         elif (node.name == "a"):
             return self.generateLinkText(node)
         
         elif (node.name == "b" or node.name == "strong"):
-            return self.parseChildren(node, " ** ", " ** ")
+            return self.parseChildren(node, p_section," ** ", " ** ")
         
         elif (node.name == "i" or node.name == "em"):
-            return self.parseChildren(node, " * ", " * ")
+            return self.parseChildren(node, p_section, " * ", " * ")
             
         elif (node.name == "h2"):
-            self.generateSection(self.TYPE_TITLE, node.text.strip())
+            p_section = self.generateSection(self.TYPE_TITLE, p_section, node.text.strip())
 
         elif (node.name == "h3"):
-            self.generateSection(self.TYPE_SUBTITLE, node.text.strip())
+            p_section = self.generateSection(self.TYPE_SUBTITLE, p_section, node.text.strip())
 
         elif (node.name == "h4"):
-            self.generateSection(self.TYPE_SUB_SUBTITLE, node.text.strip())
+            p_section = self.generateSection(self.TYPE_SUB_SUBTITLE, p_section, node.text.strip())
 
         elif (node.name == "section"):
-            nodeText = self.parseChildren(node)
+            return self.parseChildren(node, p_section)
             #if nodeText != "":
             #    self.generateSection(self.TYPE_PARAGRAPH, nodeText)
         elif (node.name == "span" or node.name == "abbr" or node.name == "u" or node.name == "div"):
-            return self.parseChildren(node)
+            return self.parseChildren(node, p_section)
 
         elif (node.name == "ul" or node.name == "ol" or node.name == "dl"):
-            nodeText = self.parseChildren(node)
-            if (self.parent_context == self.TYPE_PARAGRAPH):
-                #if nodeText != "":
-                self.generateSection(self.TYPE_LIST, nodeText)
-            else:
-                return nodeText
+            p_section = self.generateSection(self.TYPE_LIST, p_section)
+            nodeText = self.parseChildren(node, p_section)
+            self.setSectionText(p_section, nodeText)
+            return ""
 
         elif (node.name == "li" or node.name == "dt" or node.name == "dd"):
-            return self.parseChildren(node, " - ", "\n")
+            return self.parseChildren(node, p_section, " - ", "\n")
         
         elif (node.name == "blockquote"):
-            return self.parseChildren(node, " > ")
+            return self.parseChildren(node, p_section, " > ")
         
         elif (node.name == "table"):
-            if 'class' in node.attrs and "infobox" in node.attrs['class']:
-                return ""
-            else: 
-                
-                self.parseTable(node)
+            self.nestingDepth += 1
+            self.tableCounts[self.nestingDepth] = { 'column': 0, 'row': 0 }
+            p_section = self.generateSection(self.TYPE_TABLE, p_section)
+            nodeText = self.parseChildren(node, p_section)
+            self.setSectionText(p_section, nodeText)
+            self.nestingDepth -= 1
+            
+        elif (node.name == "thead" or node.name == "tbody"):
+            self.parseChildren(node, p_section)
+
+        elif (node.name == "tr"):
+            self.parseChildren(node, p_section)
+            self.tableCounts[self.nestingDepth]['row'] += 1
+            self.tableCounts[self.nestingDepth]['column'] = 0             
+
+        elif (node.name == "th" or node.name == "td"):
+            p_section = self.generateSection(self.TYPE_TABLE_CELL, p_section)
+            cell_text = self.parseChildren(node, p_section)
+            
+            column_span = int(node.attrs['colspan']) if 'colspan' in node.attrs and node.attrs['colspan'].isdigit() else 1
+            row_span = int(node.attrs['rowspan']) if 'rowspan' in node.attrs and node.attrs['rowspan'].isdigit() else 1
+            self.saveSections[p_section]['text'] = cell_text
+            self.saveSections[p_section]['column_span'] = column_span
+            self.saveSections[p_section]['row_span'] = row_span
+            self.saveSections[p_section]['row'] = self.tableCounts[self.nestingDepth]['row']
+            self.saveSections[p_section]['column'] = self.tableCounts[self.nestingDepth]['column']
+            self.saveSections[p_section]['type'] = node.name
+
+            self.tableCounts[self.nestingDepth]['column'] += 1
+            
+        elif (node.name == "caption"):
+            self.caption = self.parseChildren(node, p_section)
+
         elif (node.name == "img"):
             return ""
         else :
             return ""
         
         return ""
+
     
-    def parseTable(self, table):
-        """
-        For each section below the <table> tag go through and parse
-        after resetting the table collections
-        
-        Args:
-            table (TableElement): The table element to be parsed.
-        
-        Returns: None
-        """
-        self.tableRows = []
-        self.currentRow = []
-        self.currentColIdx = 0
-        # used as an indicator when processing links
-        self.parent_context = self.TYPE_TABLE
-        self.row_type = None
-        self.caption = None
-        for sectionChild in table.children:
-            self.parseTablePart(sectionChild)
-    
-        nodeSection =  { 'type': self.TYPE_TABLE, 'rows': self.tableRows, 'text': self.caption }
-        if (len(self.tableRows) > 0):
-            self.saveSections.append(nodeSection)
-        self.parent_context = None
-        #print(nodeSection)
-
-    def appendTableColumn(self, node, cell_text):
-        # handle column spans
-        column_span = int(node.attrs['colspan']) if 'colspan' in node.attrs and node.attrs['colspan'].isdigit() else 1
-        row_span = int(node.attrs['rowspan']) if 'rowspan' in node.attrs and node.attrs['rowspan'].isdigit() else 1
-
-        self.currentRow.append((cell_text, column_span, row_span))
-        return column_span
-    
-    def parseTablePart(self, node):
-        """
-        Parses, thead, tbody, tr by iteratively calling iself then  th, td by using the parse children method
-        rows that are are spaned are divided to give each row it's own value
-
-        Parameters:
-            node (Node): The node representing the table part to be parsed.
-
-        Returns:
-            None
-        """
-        if (node.name == "thead" or node.name == "tbody"):
-            for sectionChild in node.children:
-                self.parseTablePart(sectionChild)
-        elif (node.name == "tr"):
-            for sectionChild in node.children:
-                self.parseTablePart(sectionChild)
-            
-            # once the row is complete add it to the list
-            self.tableRows.append((self.row_type, self.currentRow))
-            self.currentRow = []
-
-        elif (node.name == "th"):
-            self.row_type = 'th'
-            self.appendTableColumn(node, self.parseChildren(node))
-            
-        elif (node.name == "caption"):
-            self.caption = self.parseChildren(node)
-        elif (node.name == "td"):
-            self.row_type = 'td'
-            self.appendTableColumn(node, self.parseChildren(node))
 
     def parseEvents(self):
         """
@@ -260,12 +213,7 @@ class TemporalParser:
         Returns: None
         """
         for idx, section in enumerate(self.saveSections):
-            if (section['type'] == self.TYPE_TABLE):
-                for rowIdx, row in enumerate(section['rows']):
-                    for columnIdx, cell in enumerate(row[1]):
-                        if (len(cell[0]) > 2):
-                            self.extract_events_spacy(cell[0], idx, rowIdx, columnIdx)
-            else:
+            if (len(section["text"]) > 2):
                 self.extract_events_spacy(str(section["text"]), idx)
 
     def generateEvent(self, idx, rowIdx, columnIdx, date, startPos, endPos, dText, desc):
@@ -324,47 +272,5 @@ class TemporalParser:
                 #         self.dep_subtree(current, "advmod")]))
                 # self.generateEvent(idx, rowIdx, columnIdx, start, ent.start_char, ent.end_char, ent.text, desc)
         return
-
-
-
-# with open(abs_file_path) as f:
-#     textLines = f.readlines()
-
-# text = ""
-# for line in textLines:
-#     tempLine = line.replace("\\n", "\n").strip() + " "
-#     # replace double escaped characters
-#     tempLine = re.sub(r"(\\')", "'", tempLine)
-#     text += tempLine
-
-
-
-# hToText = html2text.HTML2Text()
-# soup = BeautifulSoup(text, features="html.parser")
-# temporParse = TemporalParser()
-# htmltext = soup.encode('utf-8').decode('utf-8','ignore')
-# temporParse.parse(soup)
-
-# temporParse.parseEvents()
-
-
-
-# soup.find_all("section")[0].find("table", "infobox")
-
-# for section in soup.find_all("section"):
-#     hasInfobox = section.find("table", "infobox")
-#     if (hasInfobox):
-#         saveSections.append(section)
-
-#     print(article.get_plaintext( skip_categories=False, skip_transclusion=False, skip_headers=False))
-
-# newText  = hToText.handle(htmltext)
-
-
-#for article in html_dump:
-#    if article.title == "189th Infantry Brigade (United States)":
-#        print(article.get_plaintext( skip_categories=False, skip_transclusion=False, skip_headers=False))
-#        
-#    print(article.title)
 
 

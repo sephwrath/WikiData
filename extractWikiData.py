@@ -8,7 +8,7 @@ import re
 import datetime as dt
 import time
 
-ALGORYTHM_UPDATE_DATE = dt.datetime.strptime('2024-12-28', '%Y-%m-%d')
+ALGORYTHM_UPDATE_DATE = dt.datetime.strptime('2024-12-27', '%Y-%m-%d')
 
 
 
@@ -131,21 +131,6 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb):
                     
                     t_s = time.time()
 
-                    # for the first line remove the header - the headder starts with the file name
-                    # this whole section might only have been needed because of the bug in the tarfile library
-                    """if (line.startswith(file_rec[1].encode('ascii'))):
-                        line = line[len(file_rec[2]):]
-                    try:
-                        article = json.loads(line)
-                    except json.JSONDecodeError as ex:
-                        try:
-                            decoded = line.decode('utf-8')
-                            trimmed = decoded[:decoded.find(',"wikitext":"')] + '}}'
-                            article = json.loads(trimmed)
-                        except Exception as ex:
-                            print("Exception parsing: {}".format(line))
-                            continue"""
-
                     article = json.loads(line)
                     title = article['name']
                     url = article["url"]
@@ -169,8 +154,6 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb):
                     except mysql.connector.Error as err:
                         print("Mysql error: {}".format(err))
 
-                    
-
                     t_e = time.time()
                     t_tot = t_e - t_s
                     t_count += 1
@@ -178,155 +161,159 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb):
                     t_avg = t_total / t_count
                     print("title: {}, processing time: {}. Total time: {}, average time for {} articles: {}".format(title, t_tot, t_total, t_count, t_avg))
 
-
-    
-    
-
-def extract_file_articles(file_path, mycursor, mydb):
-    insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+def parse_article(article_id, line, mycursor, mydb):
+    #insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+    update_article = "UPDATE article SET `update` = %s, redirect = %s, no_dates = %s, err = %s WHERE id = %s"
     insert_article_section = "INSERT INTO article_section (article_id, section_id, `tag`, `text`) VALUES (%s, %s, %s, %s)"
     insert_article_section_table_row = "INSERT INTO article_section_table_row (article_id, section_id, row_idx, row_type) values (%s, %s, %s, %s)"
-    insert_article_section_table_cell = "INSERT INTO article_section_table_cell (row_id, column_idx, column_span, row_span, text) VALUES (%s,%s,%s, %s, %s)"
+    insert_article_section_table_cell = "INSERT INTO article_section_table_cell (row_id, column_idx, article_id, section_id, column_span, row_span, text) VALUES (%s,%s,%s,%s,%s, %s, %s)"
     insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link) values (%s, %s, %s, %s, %s, %s, %s);"
     insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-        
-    temporParse = TemporalParser()
-    raw_html = ""
-
-    prev_run_df = get_last_inserted_dump_details(mycursor)
 
     # timing variables
-    t_count = 0
-    t_total = 0
     t_s = 0
     t_e = 0
+    t_s = time.time()
+
+    temporParse = TemporalParser()
+    raw_html = ""
+    article = json.loads(line)
+
+    raw_html = article["article_body"]["html"]
+    title = article['name']
+    url = article["url"]
+
+    # replace dashes with hyphens - spacy doesn't recognize dashes
+    raw_html = raw_html.replace("–", "-")
+
+    no_events = True
+    redirect = None
+    now_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    parsed_html = BeautifulSoup(raw_html, features="html.parser")
+                        
+    temporParse.parse(parsed_html, title)
+    temporParse.parseEvents()
+    print("parsing: {}, sections {}, events {}, links {}".format(title, len(temporParse.saveSections), len(temporParse.sectionEvents), len(temporParse.sectionLinks)))
+
+    # insert the article sections and events
+    # if the no events then don't insert the sections etc just add the article info
+    if len(temporParse.sectionEvents) > 0 or len(temporParse.sectionLinks) > 0:
+        no_events = False
+
+    if not no_events:
+        # insert the article sections
+        insert_table_columns = []
+        for (sec_idx, section) in enumerate(temporParse.saveSections):
+            # (article_id, section_id `tag`, `text`)
+            #{ 'type': type, 'text': text }
+            section_text = section['text']
+            mycursor.execute(insert_article_section, (article_id, sec_idx, section['type'], section_text))
+            if (section['type'] == temporParse.TYPE_TABLE):
+                # table section = { 'type': self.TYPE_TABLE, 'rows': self.tableRows }                                
+                for (row_idx, row) in enumerate(section['rows']):
+                    #(id, article_id, section_id, row_idx, row_type)
+                    # neet to execute for each row to get the row id.
+                    mycursor.execute(insert_article_section_table_row, (article_id, sec_idx, row_idx, row[0]))
+                    new_row_id = mycursor.lastrowid
+                    for (col_idx, col) in enumerate(row[1]):
+                        # (article_id, section_id, row_idx, column_idx, column_span, row_span, text)
+                        col_span = col[1] if col[1] > 1 else None
+                        row_span = col[2] if col[2] > 1 else None
+                        insert_table_columns.append((new_row_id, col_idx, article_id, sec_idx, col_span, row_span, col[0]))
+            
+            
+        if len(insert_table_columns) > 0:
+            mycursor.executemany(insert_article_section_table_cell, insert_table_columns)
+        
+        section_links = []
+        for link in temporParse.sectionLinks:
+            # link = self.sectionLinks.append({ 'section': 'article': 'start': 'end': 'column':  'row': 
+            # (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link)
+            lr = link['row'] if 'row' in link else None
+            lc = link['column'] if 'column' in link else None
+                
+            section_links.append((article_id, link['section'], lr, lc, 
+                                            link['start'], link['end'], link['article']))
+        if len(section_links) > 0:
+            mycursor.executemany(insert_article_section_link, section_links)
+
+        parsed_events = []
+        for section in temporParse.sectionEvents:
+            # (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text
+            # event = { 'section': idx, 'rowIdx': rowIdx, 'columnIdx': columnIdx, 'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
+            er = section['rowIdx'] if 'rowIdx' in section else None
+            ec = section['columnIdx'] if 'columnIdx' in section else None
+            parsed_events.append((article_id, section['section'], er, ec, 
+                                        None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
+            
+        if len(parsed_events) > 0:
+            mycursor.executemany(insert_parsed_event, parsed_events)
+            
+    insert_values = (now_time, redirect, no_events, 'UP_TO_DATE', article_id)
+    mycursor.execute(update_article, insert_values)
+    #article_id = mycursor.lastrowid
+    mydb.commit()
+
+    t_e = time.time()
+    t_tot = t_e - t_s
+    print("title: {}, processing time: {}.".format(title, t_tot))
+
+
+def extract_article_detail_by_id(article_id, file_path, cursor, mydb):
+
+    select_article = """select a.id, title, `update`, dump_idx, url, redirect, no_dates, wiki_update_ts, err, 
+        df.file_name, df.tar_info, df.offset, df.offset_data
+        from article a, dump_file df
+        where dump_file_id = df.id 
+        and a.id = %s"""
+    delete_article_section = "delete from article_section where article_id = %s"
+    delete_article_section_table_row = "delete from article_section_table_row where article_id = %s"
+    delete_article_section_table_cell = "delete from article_section_table_cell where article_id = %s"
+    delete_article_section_link = "delete from article_section_link where article_id = %s"
+    delete_parsed_event = "delete from parsed_event where article_id = %s"
+    # check if the article needs to be updated
+    cursor.execute(select_article, (article_id,))
+    article_rec = cursor.fetchone()
+
+    if article_rec is None:
+        print("article {} not found".format(article_id))
+        return
+
+    if article_rec[8] != 'UP_TO_DATE':
+        # if it does then delete all the sections, rows, cells and links
+        cursor.execute(delete_parsed_event, (article_id,))
+        cursor.execute(delete_article_section_link, (article_id,))
+        cursor.execute(delete_article_section_table_cell, (article_id,))
+        cursor.execute(delete_article_section_table_row, (article_id,))
+        cursor.execute(delete_article_section, (article_id,))
 
     with tarfile.open(file_path, mode="r:gz") as tf:
-        for file_rec in prev_run_df[1]:
-            # load the member info from the colum as using get members requires reading the whole tarfile
-            member = tarfile.TarInfo.frombuf(file_rec[2], tarfile.ENCODING, 'surrogateescape')
+        # load the member info from the colum as using get members requires reading the whole tarfile
+        member = tarfile.TarInfo.frombuf(article_rec[10], tarfile.ENCODING, 'surrogateescape')
+        # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
+        # this seems to be a bug in the Tare file library - TODO submit a bug report
+        member.offset = article_rec[11]
+        member.offset_data = article_rec[12]
 
-            with tf.extractfile(member) as file_input:
+        with tf.extractfile(member) as file_input:
 
-                # loop through each of the articles in the files
-                for (idx, line) in enumerate(file_input):
-                    # skip until we catch up to the last inserted article
-                    if (idx <= prev_run_df[0]):
-                        continue
-                    
-                    t_s = time.time()
-                    # for the first line remove the header - the headder starts with the file name
-                    if (line.startswith(file_rec[1].encode('ascii'))):
-                        line = line[len(file_rec[2]):]
-                    article = json.loads(line)
+            # loop through each of the articles in the files
+            for (idx, line) in enumerate(file_input):
+                # skip until we catch up to the last inserted article
+                if (idx <= article_rec[3]):
+                    continue
 
-                    raw_html = article["article_body"]["html"]
-                    title = article['name']
-                    url = article["url"]
+                parse_article(article_id, line, mycursor, mydb)
 
-                    # replace dashes with hyphens - spacy doesn't recognize dashes
-                    raw_html = raw_html.replace("–", "-")
-
-                    no_events = True
-                    redirect = None
-                    now_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                    # easiest way to check for redirects is to see if there is a #REDIRECT in the wikitext
-                    if "wikitext" in article["article_body"]:
-                        wikiText = article["article_body"]["wikitext"]
-                        redirects = re.findall(r'#REDIRECT\[\[(.*)\]\]', wikiText)
-                        if len(redirects) > 0:
-                            print("parsing: {}, redirects {}".format(title, redirects))
-                            redirect = redirects[0]
-                            insert_values = (title, now_time, file_rec[0], idx, url, redirect, no_events)
-                            mycursor.execute(insert_article, insert_values)
-                            mydb.commit()
-                            continue
-
-
-                    parsed_html = BeautifulSoup(raw_html, features="html.parser")
-                                       
-                    temporParse.parse(parsed_html, title)
-                    temporParse.parseEvents()
-                    print("parsing: {}, sections {}, events {}, links {}".format(title, len(temporParse.saveSections), len(temporParse.sectionEvents), len(temporParse.sectionLinks)))
-
-                    # insert the article sections and events
-                    # if the no events then don't insert the sections etc just add the article info
-                    if len(temporParse.sectionEvents) > 0 or len(temporParse.sectionLinks) > 0:
-                        no_events = False
-
-                    insert_values = (title, now_time, file_rec[0], idx, url, redirect, no_events)
-                    mycursor.execute(insert_article, insert_values)
-                    article_id = mycursor.lastrowid
-
-                    if not no_events:
-                        # insert the article sections
-                        insert_sections = []
-                        insert_table_rows = []
-                        insert_table_columns = []
-                        for (sec_idx, section) in enumerate(temporParse.saveSections):
-                            # (article_id, section_id `tag`, `text`)
-                            #{ 'type': type, 'text': text }
-                            section_text = section['text']
-                            mycursor.execute(insert_article_section, (article_id, sec_idx, section['type'], section_text))
-                            if (section['type'] == temporParse.TYPE_TABLE):
-                                # table section = { 'type': self.TYPE_TABLE, 'rows': self.tableRows }                                
-                                for (row_idx, row) in enumerate(section['rows']):
-                                    #(id, article_id, section_id, row_idx, row_type)
-                                    #insert_table_rows.append()
-                                    # neet to execute for each row to get the row id.
-                                    mycursor.execute(insert_article_section_table_row, (article_id, sec_idx, row_idx, row[0]))
-                                    new_row_id = mycursor.lastrowid
-                                    for (col_idx, col) in enumerate(row[1]):
-                                        # (article_id, section_id, row_idx, column_idx, column_span, row_span, text)
-                                        col_span = col[1] if col[1] > 1 else None
-                                        row_span = col[2] if col[2] > 1 else None
-                                        insert_table_columns.append((new_row_id, col_idx, col_span, row_span, col[0]))
-                            
-                            
-                        if len(insert_table_columns) > 0:
-                            mycursor.executemany(insert_article_section_table_cell, insert_table_columns)
-                        
-                        section_links = []
-                        for link in temporParse.sectionLinks:
-                            # link = self.sectionLinks.append({ 'section': 'article': 'start': 'end': 'column':  'row': 
-                            # (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link)
-                            lr = link['row'] if 'row' in link else None
-                            lc = link['column'] if 'column' in link else None
-                                
-                            section_links.append((article_id, link['section'], lr, lc, 
-                                                         link['start'], link['end'], link['article']))
-                        if len(section_links) > 0:
-                            mycursor.executemany(insert_article_section_link, section_links)
-
-                        parsed_events = []
-                        for section in temporParse.sectionEvents:
-                            # (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text
-                            # event = { 'section': idx, 'rowIdx': rowIdx, 'columnIdx': columnIdx, 'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
-                            er = section['rowIdx'] if 'rowIdx' in section else None
-                            ec = section['columnIdx'] if 'columnIdx' in section else None
-                            parsed_events.append((article_id, section['section'], er, ec, 
-                                                        None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
-                            
-                        if len(parsed_events) > 0:
-                            mycursor.executemany(insert_parsed_event, parsed_events)
-                            
-                    mydb.commit()
-
-                    t_e = time.time()
-                    t_tot = t_e - t_s
-                    t_count += 1
-                    t_total += t_tot
-                    t_avg = t_total / t_count
-                    print("title: {}, processing time: {}. Total time: {}, average time for {} articles: {}".format(title, t_tot, t_total, t_count, t_avg))
-
+    # then get 
 
 
 if __name__ == "__main__":
     mydb = mysql.connector.connect(
             host="localhost",
             user="temporal",
-            password="",
+            password="nutsackcoffeedunk1957",
             database="wikidata"
         )
     
@@ -363,7 +350,9 @@ if __name__ == "__main__":
 
     #extract_file_articles(html_file_path, mycursor, mydb)
 
-    extract_atticle_to_article_tbl(html_file_path, mycursor, mydb)
+    #extract_atticle_to_article_tbl(html_file_path, mycursor, mydb)
+
+    extract_article_detail_by_id(4619103, html_file_path, mycursor, mydb)
 
     #get_article_count(html_file_path, mycursor)
 
