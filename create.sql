@@ -1,35 +1,7 @@
-CREATE TABLE `chunkOffsets` (
-	`id` int unsigned NOT NULL,
-    `start` bigint unsigned NOT NULL,
-    `end` bigint unsigned NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `index_UNIQUE` (`id`) );
 
-CREATE TABLE `wikipageindex` (
-  `title` varchar(400) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-  `chunkOffset` int unsigned NOT NULL,
-  `articleID` int unsigned NOT NULL,
-  --PRIMARY KEY (`articleID`),
-  --UNIQUE KEY `title_UNIQUE` (`title`),
-  KEY `chunkOffset_FK_idx` (`chunkOffset`),
-  CONSTRAINT `chunkOffset_FK` FOREIGN KEY (`chunkOffset`) REFERENCES `chunkoffsets` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin;
-
-
-
-
-CREATE UNIQUE INDEX title_UNIQUE ON wikipageindex (title);
-ALTER TABLE wikipageindex ADD PRIMARY KEY (articleID);
-CREATE UNIQUE INDEX index_UNIQUE ON chunkOffsets (id);
-ALTER TABLE chunkOffsets ADD PRIMARY KEY (id);
-ALTER TABLE wikipageindex MODIFY title VARCHAR(400) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
-
-ALTER TABLE wikipageindex CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 drop table parsed_event;
 drop table article_section_ext_text
-drop table article_section_table_row;
-drop table article_section_table_cell;
 drop table article_section_link;
 drop table article_section;
 drop table article;
@@ -63,87 +35,46 @@ CREATE TABLE `article` (
      FOREIGN KEY (dump_file_id) REFERENCES dump_file(ID)
 );
 
-
-
 CREATE TABLE `article_section` (
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL, -- not auto generated so it can be used to check the number of sections easily
-    `tag` varchar(40) NOT NULL,
-    `text` varchar(15000),
-    `ext_text_id` int unsigned,
-
-    'parent_section_id' int unsigned,
+    `ext_text_count` int unsigned,
+    `parent_section_id` int unsigned,
     `row_idx` int unsigned,
     `column_idx` int unsigned,
-    `column_span` int unsigned,
     `row_span` int unsigned,
-
+    `column_span` int unsigned,
+    `tag` varchar(40) NOT NULL,
+    `format` varchar(200),
+    `text` varchar(15000),
     PRIMARY KEY (`article_id`,`section_id`),
     INDEX `article_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID)
 );
 
-
-CREATE TABLE `article_section_table_row` (
-    `id` int unsigned NOT NULL AUTO_INCREMENT,
-    `article_id` int unsigned NOT NULL,
-    `section_id` int unsigned NOT NULL,
-    `row_idx` int NOT NULL,
-    `row_type` varchar(4),
-    PRIMARY KEY (`id`),
-    INDEX `article_section_id_idx` (`article_id`),
-    FOREIGN KEY (article_id) REFERENCES article(ID),
-    FOREIGN KEY (section_id) REFERENCES article_section(section_id)
-);
-
-
-CREATE TABLE `article_section_table_cell` (
-    `row_id` int unsigned NOT NULL,
-    `column_idx` int unsigned NOT NULL,
-    `article_id` int unsigned NOT NULL,
-    `section_id` int unsigned NOT NULL,
-    `column_span` int unsigned,
-    `row_span` int unsigned,
-    `ext_text_id` int unsigned,
-    `text` varchar(10000),
-    PRIMARY KEY (`row_id`, `column_idx`),
-    INDEX `row_id_idx` (`row_id`),
-    INDEX `article_section_id_idx` (`article_id`),
-    FOREIGN KEY (row_id) REFERENCES article_section_table_row(ID),
-    FOREIGN KEY (article_id) REFERENCES article(ID),
-    FOREIGN KEY (section_id) REFERENCES article_section(section_id)
-);
-
-
-
 CREATE TABLE `article_section_link` (
     `id` int unsigned NOT NULL AUTO_INCREMENT,
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL,
-    `row_idx` int unsigned,
-    `column_idx` int unsigned,
     `start_pos` int NOT NULL, -- the index into the text where the link starts
     `end_pos` int NOT NULL, -- the index into the text where the link ends
     `link` varchar(1000) NOT NULL,
     PRIMARY KEY (`id`),
-    INDEX `article_section_id_idx` (`article_id`),
+    INDEX `article_section_link_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
-    FOREIGN KEY (section_id) REFERENCES article_section(section_id)
+    FOREIGN KEY (article_id, section_id) REFERENCES article_section(article_id, `section_id`)
 );
 
 -- table to contain any extended text that won't fit in cells or article sections
 CREATE TABLE `article_section_ext_text` (
-    `id` int unsigned NOT NULL AUTO_INCREMENT,
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL,
-    `row_idx` int unsigned,
-    `column_idx` int unsigned,
-    `ext_text_id` int unsigned,
+    `count_id` int unsigned,
     `text` varchar(15000),
-    PRIMARY KEY (`id`),
+    PRIMARY KEY (`article_id`,`section_id`, `count_id`),
     INDEX `article_section_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
-    FOREIGN KEY (section_id) REFERENCES article_section(section_id)
+    FOREIGN KEY (article_id, section_id) REFERENCES article_section(article_id, section_id)
 );
 
 
@@ -153,8 +84,6 @@ CREATE TABLE `parsed_event` (
     id int unsigned NOT NULL AUTO_INCREMENT,
     `article_id` int unsigned NOT NULL,
     `section_id` int unsigned NOT NULL,
-    `row_idx` int unsigned,
-    `column_idx` int unsigned,
     `start_date` bigint, -- 13 billion * secs in year = 4.1002e+17 seconds since the big bang < 1.8447e+19 (big int unsigned max)
     `end_date` bigint,
     `parse_status` int,
@@ -166,15 +95,11 @@ CREATE TABLE `parsed_event` (
     UNIQUE KEY `pe_index_UNIQUE` (`id`),
     INDEX `article_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
-    FOREIGN KEY (section_id) REFERENCES article_Section(section_id) 
+    FOREIGN KEY (article_id, section_id) REFERENCES article_Section(article_id, section_id) 
 );
 
 
-select * from article where id > 2000;
 
-SELECT * FROM wikidata.article_section where article_id = 75;
 
-select * from wikidata.parsed_event where article_id = 75;
-
-SELECT `table_name`, table_rows, ROUND((data_length + index_length) / 1024 / 1024, 1) "DB Size in MB" 
-FROM information_schema.tables;
+--SELECT `table_name`, table_rows, ROUND((data_length + index_length) / 1024 / 1024, 1) "DB Size in MB" 
+--FROM information_schema.tables;

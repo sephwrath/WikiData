@@ -10,7 +10,7 @@ import spacy, re
 
 
 
-class TemporalParser:
+class WikiHtmlParser:
     def __init__(self):
         # if _EXT is added to the end then the section is an extension of the last section
         self.TYPE_MAIN_TITLE = "MAIN_TITLE"
@@ -57,7 +57,7 @@ class TemporalParser:
         if (self.soup.find(id="External_links")):
             self.soup.find(id="External_links").findParent(name="section").clear()
         # title is added as the first section
-        parent_section = self.generateSection(self.TYPE_TITLE, title)
+        parent_section = self.generateSection(self.TYPE_TITLE, None, title)
 
         self.parseChildren(self.soup.find('body'), parent_section, 0)
 
@@ -191,6 +191,7 @@ class TemporalParser:
             self.saveSections[p_section]['row'] = self.tableCounts[self.nestingDepth]['row']
             self.saveSections[p_section]['column'] = self.tableCounts[self.nestingDepth]['column']
             self.saveSections[p_section]['type'] = node.name
+
 
             self.tableCounts[self.nestingDepth]['column'] += 1
             

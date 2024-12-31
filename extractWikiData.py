@@ -1,12 +1,14 @@
 import tarfile
 import mysql.connector
 import json
-from temporalParse import TemporalParser
+from wikiHtmllParse import WikiHtmlParser
 import html2text
 from bs4 import BeautifulSoup
 import re
+import os
 import datetime as dt
 import time
+import configparser
 
 ALGORYTHM_UPDATE_DATE = dt.datetime.strptime('2024-12-27', '%Y-%m-%d')
 
@@ -47,7 +49,7 @@ def extract_file_names(file_path, cursor, mydb):
                     cursor.execute(sql_ins_dump_file, val)
                 mydb.commit()
 
-def get_last_inserted_dump_details(mycursor):
+def get_missing_dump_details(mycursor):
 
     """
     Retrieves details of the last inserted articles dump file and gets all the dump files after that
@@ -82,23 +84,52 @@ def get_last_inserted_dump_details(mycursor):
 
 def get_article_count(file_path,mycursor):
 
-    prev_run_df = get_last_inserted_dump_details(mycursor)
+    prev_run_df = get_missing_dump_details(mycursor)
 
     with tarfile.open(file_path, mode="r:gz") as tf:
         # load the member info from the colum as using get members requires reading the whole tarfile
         
         for file_rec in prev_run_df[1]:
             member = tarfile.TarInfo.frombuf(file_rec[2], tarfile.ENCODING, 'surrogateescape')
+            member.offset = file_rec[3]
+            member.offset_data = file_rec[4]
+
             with tf.extractfile(member) as file_input:
                 num_lines = sum(1 for _ in file_input)
 
             print("{} articles in {}".format(num_lines, file_rec[1]))
 
+def extract_tar_files(tar_path, save_path):
+    files = os.listdir(save_path)
+    with tarfile.open(tar_path, mode="r:gz") as tf:
+        while True:
+            member = tf.next()
+            if member is None:
+                break
+            if member.isfile():
+                with tf.extractfile(member) as file_input:
+                    if member.name not in files:
+                        with open(save_path + member.name, "wb") as file_output:
+                            file_output.write(file_input.read())
+
+def create_tar_files(save_path):
+    files = os.listdir(save_path)
+
+    for file in files:
+        if file.endswith(".tar.gz"):
+            continue
+        with tarfile.open(save_path + file + ".tar.gz", mode="w:gz") as tar:
+            tar.add(save_path + file, arcname=file)
+            tar.close()
+
+        os.remove(save_path + file)
+
+
 # get just the article details for the article_table 
 def extract_atticle_to_article_tbl(file_path, mycursor, mydb):
     insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
 
-    prev_run_df = get_last_inserted_dump_details(mycursor)
+    prev_run_df = get_missing_dump_details(mycursor)
 
     # timing variables
     t_count = 0
@@ -164,18 +195,20 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb):
 def parse_article(article_id, line, mycursor, mydb):
     #insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
     update_article = "UPDATE article SET `update` = %s, redirect = %s, no_dates = %s, err = %s WHERE id = %s"
-    insert_article_section = "INSERT INTO article_section (article_id, section_id, `tag`, `text`) VALUES (%s, %s, %s, %s)"
-    insert_article_section_table_row = "INSERT INTO article_section_table_row (article_id, section_id, row_idx, row_type) values (%s, %s, %s, %s)"
-    insert_article_section_table_cell = "INSERT INTO article_section_table_cell (row_id, column_idx, article_id, section_id, column_span, row_span, text) VALUES (%s,%s,%s,%s,%s, %s, %s)"
-    insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link) values (%s, %s, %s, %s, %s, %s, %s);"
-    insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+
+    insert_article_section = """INSERT INTO article_section (article_id, section_id, tag, ext_text_count, parent_section_id, 
+        row_idx, column_idx, row_span, column_span, format, text) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+    insert_article_section_ext_text = "INSERT INTO article_section_ext_text (article_id, section_id, count_id, text) values (%s, %s, %s, %s)"
+    insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, start_pos, end_pos, link) values (%s, %s, %s, %s, %s);"
+    insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
 
     # timing variables
     t_s = 0
     t_e = 0
     t_s = time.time()
 
-    temporParse = TemporalParser()
+    wikiHtmlParser = WikiHtmlParser()
     raw_html = ""
     article = json.loads(line)
 
@@ -192,60 +225,60 @@ def parse_article(article_id, line, mycursor, mydb):
 
     parsed_html = BeautifulSoup(raw_html, features="html.parser")
                         
-    temporParse.parse(parsed_html, title)
-    temporParse.parseEvents()
-    print("parsing: {}, sections {}, events {}, links {}".format(title, len(temporParse.saveSections), len(temporParse.sectionEvents), len(temporParse.sectionLinks)))
+    wikiHtmlParser.parse(parsed_html, title)
+    wikiHtmlParser.parseEvents()
+    print("parsing: {}, sections {}, events {}, links {}".format(title, len(wikiHtmlParser.saveSections), len(wikiHtmlParser.sectionEvents), len(wikiHtmlParser.sectionLinks)))
 
     # insert the article sections and events
     # if the no events then don't insert the sections etc just add the article info
-    if len(temporParse.sectionEvents) > 0 or len(temporParse.sectionLinks) > 0:
+    if len(wikiHtmlParser.sectionEvents) > 0 or len(wikiHtmlParser.sectionLinks) > 0:
         no_events = False
 
     if not no_events:
         # insert the article sections
         insert_table_columns = []
-        for (sec_idx, section) in enumerate(temporParse.saveSections):
+        for (sec_idx, section) in enumerate(wikiHtmlParser.saveSections):
             # (article_id, section_id `tag`, `text`)
             #{ 'type': type, 'text': text }
+            # split the section text into chunks for saving in the database
             section_text = section['text']
-            mycursor.execute(insert_article_section, (article_id, sec_idx, section['type'], section_text))
-            if (section['type'] == temporParse.TYPE_TABLE):
-                # table section = { 'type': self.TYPE_TABLE, 'rows': self.tableRows }                                
-                for (row_idx, row) in enumerate(section['rows']):
-                    #(id, article_id, section_id, row_idx, row_type)
-                    # neet to execute for each row to get the row id.
-                    mycursor.execute(insert_article_section_table_row, (article_id, sec_idx, row_idx, row[0]))
-                    new_row_id = mycursor.lastrowid
-                    for (col_idx, col) in enumerate(row[1]):
-                        # (article_id, section_id, row_idx, column_idx, column_span, row_span, text)
-                        col_span = col[1] if col[1] > 1 else None
-                        row_span = col[2] if col[2] > 1 else None
-                        insert_table_columns.append((new_row_id, col_idx, article_id, sec_idx, col_span, row_span, col[0]))
+            section_chunks = []
+            if section_text == "":
+                section_chunks.append("")
+            else:
+                while section_text:
+                    chunk, section_text = section_text[:14000], section_text[14000:]
+                    section_chunks.append(chunk)
             
+            ext_type_count = len(section_chunks) - 1
+
+            #returned table values - column_span, row_span, row, column, type
+            if 'row' in section:
+                # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
+                section_tuple = (article_id, sec_idx, section['type'], ext_type_count, section['parent_section'],
+                    section['row'], section['column'], section['row_span'], section['column_span'], section['type'], section_chunks[0])
+            else:
+                # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
+                section_tuple = (article_id, sec_idx, section['type'], ext_type_count, section['parent_section'],
+                    None, None, None, None, None, section_chunks[0])
             
-        if len(insert_table_columns) > 0:
-            mycursor.executemany(insert_article_section_table_cell, insert_table_columns)
-        
+            mycursor.execute(insert_article_section, section_tuple)
+
+            for (chunk_idx, section_chunk) in enumerate(section_chunks[1:]):
+                mycursor.execute(insert_article_section_ext_text, (article_id, sec_idx, chunk_idx, section_chunk))
+
         section_links = []
-        for link in temporParse.sectionLinks:
-            # link = self.sectionLinks.append({ 'section': 'article': 'start': 'end': 'column':  'row': 
-            # (article_id, section_id, row_idx, column_idx, start_pos, end_pos, link)
-            lr = link['row'] if 'row' in link else None
-            lc = link['column'] if 'column' in link else None
-                
-            section_links.append((article_id, link['section'], lr, lc, 
-                                            link['start'], link['end'], link['article']))
+        for link in wikiHtmlParser.sectionLinks:
+            # (article_id, section_id, start_pos, end_pos, link)                
+            section_links.append((article_id, link['section'], link['start'], link['end'], link['article']))
         if len(section_links) > 0:
             mycursor.executemany(insert_article_section_link, section_links)
 
         parsed_events = []
-        for section in temporParse.sectionEvents:
-            # (article_id, section_id, row_idx, column_idx, start_date, end_date, date_text, start_pos, end_pos, display_text
-            # event = { 'section': idx, 'rowIdx': rowIdx, 'columnIdx': columnIdx, 'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
-            er = section['rowIdx'] if 'rowIdx' in section else None
-            ec = section['columnIdx'] if 'columnIdx' in section else None
-            parsed_events.append((article_id, section['section'], er, ec, 
-                                        None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
+        for section in wikiHtmlParser.sectionEvents:
+            # (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text
+            # event = { 'section': idx,  'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
+            parsed_events.append((article_id, section['section'], None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
             
         if len(parsed_events) > 0:
             mycursor.executemany(insert_parsed_event, parsed_events)
@@ -260,7 +293,7 @@ def parse_article(article_id, line, mycursor, mydb):
     print("title: {}, processing time: {}.".format(title, t_tot))
 
 
-def extract_article_detail_by_id(article_id, file_path, cursor, mydb):
+def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_path = None):
 
     select_article = """select a.id, title, `update`, dump_idx, url, redirect, no_dates, wiki_update_ts, err, 
         df.file_name, df.tar_info, df.offset, df.offset_data
@@ -268,8 +301,7 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb):
         where dump_file_id = df.id 
         and a.id = %s"""
     delete_article_section = "delete from article_section where article_id = %s"
-    delete_article_section_table_row = "delete from article_section_table_row where article_id = %s"
-    delete_article_section_table_cell = "delete from article_section_table_cell where article_id = %s"
+    delete_article_section_ext_text = "delete from article_section_ext_text where article_id = %s"
     delete_article_section_link = "delete from article_section_link where article_id = %s"
     delete_parsed_event = "delete from parsed_event where article_id = %s"
     # check if the article needs to be updated
@@ -284,42 +316,74 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb):
         # if it does then delete all the sections, rows, cells and links
         cursor.execute(delete_parsed_event, (article_id,))
         cursor.execute(delete_article_section_link, (article_id,))
-        cursor.execute(delete_article_section_table_cell, (article_id,))
-        cursor.execute(delete_article_section_table_row, (article_id,))
+        cursor.execute(delete_article_section_ext_text, (article_id,))
         cursor.execute(delete_article_section, (article_id,))
+        mydb.commit()
 
-    with tarfile.open(file_path, mode="r:gz") as tf:
-        # load the member info from the colum as using get members requires reading the whole tarfile
-        member = tarfile.TarInfo.frombuf(article_rec[10], tarfile.ENCODING, 'surrogateescape')
-        # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
-        # this seems to be a bug in the Tare file library - TODO submit a bug report
-        member.offset = article_rec[11]
-        member.offset_data = article_rec[12]
-
-        with tf.extractfile(member) as file_input:
-
-            # loop through each of the articles in the files
-            for (idx, line) in enumerate(file_input):
-                # skip until we catch up to the last inserted article
-                if (idx <= article_rec[3]):
+    # if we are using the json files then just read the file
+    if json_save_path is not None:
+        # save the json to a file
+        with open(json_save_path + article_rec[9], "r", encoding=tarfile.ENCODING) as file_output:
+            for (idx, line) in enumerate(file_output):
+                if (idx < article_rec[3]):
                     continue
+                parse_article(article_id, line, cursor, mydb)
+                break
+    else:
+        with tarfile.open(file_path, mode="r:gz") as tf:
+            # load the member info from the colum as using get members requires reading the whole tarfile
+            member = tarfile.TarInfo.frombuf(article_rec[10], tarfile.ENCODING, 'surrogateescape')
+            # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
+            # this seems to be a bug in the Tare file library - TODO submit a bug report
+            member.offset = article_rec[11]
+            member.offset_data = article_rec[12]
 
-                parse_article(article_id, line, mycursor, mydb)
+            with tf.extractfile(member) as file_input:
+
+                # loop through each of the articles in the files
+                for (idx, line) in enumerate(file_input):
+                    # skip until we catch up to the last inserted article
+                    if (idx < article_rec[3]):
+                        continue
+
+                    parse_article(article_id, line, mycursor, mydb)
+                    break
 
     # then get 
 
 
 if __name__ == "__main__":
+
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+
     mydb = mysql.connector.connect(
-            host="localhost",
-            user="temporal",
-            password="nutsackcoffeedunk1957",
-            database="wikidata"
+            host=config.get('General', 'host'),
+            user=config.get('General', 'user'),
+            password=config.get('General', 'password'),
+            database=config.get('General', 'database')
         )
     
-    html_file_path = "C:\\Users\\stephen\\Documents\\enwiki-NS0-20231020-ENTERPRISE-HTML.json.tar.gz"
+    html_file_path = config.get('General', 'html_file_path')
+    json_save_path = config.get('General', 'json_save_path')
 
     mycursor = mydb.cursor()
+
+    #extract_file_names(html_file_path, mycursor, mydb)
+
+    #extract_file_articles(html_file_path, mycursor, mydb)
+
+    #extract_atticle_to_article_tbl(html_file_path, mycursor, mydb)
+
+    #extract_tar_files(html_file_path, json_save_path)
+
+    #get_article_count(html_file_path, json_save_path)
+
+    extract_article_detail_by_id(6386494, html_file_path, mycursor, mydb, json_save_path)
+
+    #create_tar_files(json_save_path)
+
+    #get_article_count(html_file_path, mycursor)
 
     """with tarfile.open(html_file_path, mode="r:gz") as tf:
         while True:
@@ -346,15 +410,7 @@ if __name__ == "__main__":
 
     print(member)"""
 
-    #extract_file_names(html_file_path, mycursor, mydb)
-
-    #extract_file_articles(html_file_path, mycursor, mydb)
-
-    #extract_atticle_to_article_tbl(html_file_path, mycursor, mydb)
-
-    extract_article_detail_by_id(4619103, html_file_path, mycursor, mydb)
-
-    #get_article_count(html_file_path, mycursor)
+    
 
     
 
