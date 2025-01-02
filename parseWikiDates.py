@@ -1,4 +1,5 @@
 import mysql.connector
+import configparser
 
 import re
 import datetime as dt
@@ -11,16 +12,16 @@ import sys
 # parent directory
 sys.path.append("C:/Users/stephen/Documents/Projects/date-finder/dt_rd_parser")
 
-from timeParser import TimeParser
+from dt_rd_parser.timeParser import TimeParser
 
 
 
 def extract_dates_from_db(cursor, mydb):
 
     update_parsed_event = """UPDATE wikidata.parsed_event SET start_date = %s, end_date = %s where id = %s;"""
-    mycursor.execute("""select article_id, section_id, row_idx, column_idx, date_text, start_pos, end_pos, id 
+    mycursor.execute("""select article_id, section_id, date_text, start_pos, end_pos, id 
         from wikidata.parsed_event where start_date is Null or end_date is Null
-        order by article_id, section_id, row_idx, column_idx
+        order by article_id, section_id
         limit 1000;""")
     
     dates_to_parse = mycursor.fetchall()
@@ -92,12 +93,19 @@ def get_date_context(cursor, article_id, section_id, row_idx, column_idx):
     return retVal
 
 if __name__ == "__main__":
+
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    
     mydb = mysql.connector.connect(
-            host="localhost",
-            user="temporal",
-            password="***********",
-            database="wikidata"
+            host=config.get('General', 'host'),
+            user=config.get('General', 'user'),
+            password=config.get('General', 'password'),
+            database=config.get('General', 'database')
         )
+    
+    html_file_path = config.get('General', 'html_file_path')
+    json_save_path = config.get('General', 'json_save_path')
 
     mycursor = mydb.cursor()
 

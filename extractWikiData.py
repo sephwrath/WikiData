@@ -1,7 +1,7 @@
 import tarfile
 import mysql.connector
 import json
-from wikiHtmllParse import WikiHtmlParser
+from .wikiHtmllParse import WikiHtmlParser
 import html2text
 from bs4 import BeautifulSoup
 import re
@@ -124,75 +124,111 @@ def create_tar_files(save_path):
 
         os.remove(save_path + file)
 
-
-# get just the article details for the article_table 
-def extract_atticle_to_article_tbl(file_path, mycursor, mydb):
-    insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
-
-    prev_run_df = get_missing_dump_details(mycursor)
+def write_article_lines_to_db(line, dump_id, dump_idx, mycursor):
+    insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates, wiki_update_ts, description) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
     # timing variables
     t_count = 0
     t_total = 0
     t_s = 0
     t_e = 0
+    t_s = time.time()
+
+    article = json.loads(line)
+    title = article['name']
+    url = article["url"]
+
+    no_events = None
+    redirect = None
+    now_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # easiest way to check for redirects is to see if there is a #REDIRECT in the wikitext
+    if "wikitext" in article["article_body"]:
+        wikiText = article["article_body"]["wikitext"]
+        redirects = re.findall(r'#REDIRECT\[\[(.*)\]\]', wikiText)
+        if len(redirects) > 0:
+            print("parsing: {}, redirects {}".format(title, redirects))
+            redirect = redirects[0]
+    
+    try:
+        mod_date = None
+        if 'date_modified' in article:
+            mod_date = dt.datetime.strptime(article['date_modified'], '%Y-%m-%dT%H:%M:%SZ')
+        description = None 
+        if 'abstract' in article:
+            if len(article['abstract']) > 1000:
+                description = article['abstract'][:997] + "..."
+            else:
+                description = article['abstract']
+
+        insert_values = (title, now_time, dump_id, dump_idx, url, redirect, no_events, mod_date, description)
+        mycursor.execute(insert_article, insert_values)
+        if 'redirects' in article:
+            for redirect in article['redirects']:
+                if 'url' not in redirect:
+                    redirect['url'] = None
+                if 'name' in redirect:
+                    mycursor.execute(insert_article, (redirect['name'], now_time, None, None, redirect['url'], title, no_events, mod_date, None))
+
+
+        mydb.commit()
+    except mysql.connector.Error as err:
+        print("Mysql error: {}".format(err))
+
+    t_e = time.time()
+    t_tot = t_e - t_s
+    t_count += 1
+    t_total += t_tot
+    t_avg = t_total / t_count
+    print("title: {}, processing time: {}. Total time: {}, average time for {} articles: {}".format(title, t_tot, t_total, t_count, t_avg))
+
+
+# get just the article details for the article_table 
+def extract_atticle_to_article_tbl(file_path, mycursor, mydb, json_save_path):
+    prev_run_df = get_missing_dump_details(mycursor)
+    
     file_start_offset = prev_run_df[0]
     first_file_id = prev_run_df[1][0][0]
 
-    with tarfile.open(file_path, mode="r:gz") as tf:
+    # if we are using the json files then just read the file
+    if json_save_path is not None:
+        # save the json to a file
         for file_rec in prev_run_df[1]:
-            # load the member info from the colum as using get members requires reading the whole tarfile
-            member = tarfile.TarInfo.frombuf(file_rec[2], tarfile.ENCODING, 'surrogateescape')
-            # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
-            # this seems to be a bug in the Tare file library - TODO submit a bug report
-            member.offset = file_rec[3]
-            member.offset_data = file_rec[4]
 
-            # reset the line offset for subsequent files
             if file_rec[0] > first_file_id:
-                file_start_offset = -1
+                    file_start_offset = -1
 
-            with tf.extractfile(member) as file_input:
-
-                # loop through each of the articles in the files
-                for (idx, line) in enumerate(file_input):
-                    # skip until we catch up to the last inserted article
+            with open(json_save_path + file_rec[1], "r", encoding=tarfile.ENCODING) as file_output:
+                for (idx, line) in enumerate(file_output):
                     if (idx <= file_start_offset):
                         continue
+                    write_article_lines_to_db(line, file_rec[0], idx, mycursor)
+    else:
+
+        with tarfile.open(file_path, mode="r:gz") as tf:
+            for file_rec in prev_run_df[1]:
+                # load the member info from the colum as using get members requires reading the whole tarfile
+                member = tarfile.TarInfo.frombuf(file_rec[2], tarfile.ENCODING, 'surrogateescape')
+                # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
+                # this seems to be a bug in the Tare file library - TODO submit a bug report
+                member.offset = file_rec[3]
+                member.offset_data = file_rec[4]
+
+                # reset the line offset for subsequent files
+                if file_rec[0] > first_file_id:
+                    file_start_offset = -1
+
+                with tf.extractfile(member) as file_input:
+
+                    # loop through each of the articles in the files
+                    for (idx, line) in enumerate(file_input):
+                        # skip until we catch up to the last inserted article
+                        if (idx <= file_start_offset):
+                            continue
+                        write_article_lines_to_db(line, file_rec[0], idx, mycursor)
                     
-                    t_s = time.time()
 
-                    article = json.loads(line)
-                    title = article['name']
-                    url = article["url"]
-
-                    no_events = None
-                    redirect = None
-                    now_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                    # easiest way to check for redirects is to see if there is a #REDIRECT in the wikitext
-                    if "wikitext" in article["article_body"]:
-                        wikiText = article["article_body"]["wikitext"]
-                        redirects = re.findall(r'#REDIRECT\[\[(.*)\]\]', wikiText)
-                        if len(redirects) > 0:
-                            print("parsing: {}, redirects {}".format(title, redirects))
-                            redirect = redirects[0]
-                    
-                    try:
-                        insert_values = (title, now_time, file_rec[0], idx, url, redirect, no_events)
-                        mycursor.execute(insert_article, insert_values)
-                        mydb.commit()
-                    except mysql.connector.Error as err:
-                        print("Mysql error: {}".format(err))
-
-                    t_e = time.time()
-                    t_tot = t_e - t_s
-                    t_count += 1
-                    t_total += t_tot
-                    t_avg = t_total / t_count
-                    print("title: {}, processing time: {}. Total time: {}, average time for {} articles: {}".format(title, t_tot, t_total, t_count, t_avg))
-
-def parse_article(article_id, line, mycursor, mydb):
+def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
     #insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
     update_article = "UPDATE article SET `update` = %s, redirect = %s, no_dates = %s, err = %s WHERE id = %s"
 
@@ -208,7 +244,7 @@ def parse_article(article_id, line, mycursor, mydb):
     t_e = 0
     t_s = time.time()
 
-    wikiHtmlParser = WikiHtmlParser()
+    #wikiHtmlParser = WikiHtmlParser()
     raw_html = ""
     article = json.loads(line)
 
@@ -293,7 +329,7 @@ def parse_article(article_id, line, mycursor, mydb):
     print("title: {}, processing time: {}.".format(title, t_tot))
 
 
-def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_path = None):
+def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_path = None, wikiHtmlParser = WikiHtmlParser()):
 
     select_article = """select a.id, title, `update`, dump_idx, url, redirect, no_dates, wiki_update_ts, err, 
         df.file_name, df.tar_info, df.offset, df.offset_data
@@ -304,6 +340,11 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
     delete_article_section_ext_text = "delete from article_section_ext_text where article_id = %s"
     delete_article_section_link = "delete from article_section_link where article_id = %s"
     delete_parsed_event = "delete from parsed_event where article_id = %s"
+
+    select_article_section = "select * from article_section where article_id = %s"
+    select_article_section_ext_text = "select * from article_section_ext_text where article_id = %s"
+    select_article_section_link = "select * from article_section_link where article_id = %s"
+    select_parsed_event = "select * from parsed_event where article_id = %s"
     # check if the article needs to be updated
     cursor.execute(select_article, (article_id,))
     article_rec = cursor.fetchone()
@@ -320,36 +361,65 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
         cursor.execute(delete_article_section, (article_id,))
         mydb.commit()
 
-    # if we are using the json files then just read the file
-    if json_save_path is not None:
-        # save the json to a file
-        with open(json_save_path + article_rec[9], "r", encoding=tarfile.ENCODING) as file_output:
-            for (idx, line) in enumerate(file_output):
-                if (idx < article_rec[3]):
-                    continue
-                parse_article(article_id, line, cursor, mydb)
-                break
-    else:
-        with tarfile.open(file_path, mode="r:gz") as tf:
-            # load the member info from the colum as using get members requires reading the whole tarfile
-            member = tarfile.TarInfo.frombuf(article_rec[10], tarfile.ENCODING, 'surrogateescape')
-            # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
-            # this seems to be a bug in the Tare file library - TODO submit a bug report
-            member.offset = article_rec[11]
-            member.offset_data = article_rec[12]
-
-            with tf.extractfile(member) as file_input:
-
-                # loop through each of the articles in the files
-                for (idx, line) in enumerate(file_input):
-                    # skip until we catch up to the last inserted article
+        # if we are using the json files then just read the file
+        if json_save_path is not None:
+            # save the json to a file
+            with open(json_save_path + article_rec[9], "r", encoding=tarfile.ENCODING) as file_output:
+                for (idx, line) in enumerate(file_output):
                     if (idx < article_rec[3]):
                         continue
-
-                    parse_article(article_id, line, mycursor, mydb)
+                    parse_article(article_id, line, cursor, mydb, wikiHtmlParser)
                     break
+        else:
+            with tarfile.open(file_path, mode="r:gz") as tf:
+                # load the member info from the colum as using get members requires reading the whole tarfile
+                member = tarfile.TarInfo.frombuf(article_rec[10], tarfile.ENCODING, 'surrogateescape')
+                # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
+                # this seems to be a bug in the Tare file library - TODO submit a bug report
+                member.offset = article_rec[11]
+                member.offset_data = article_rec[12]
 
-    # then get 
+                with tf.extractfile(member) as file_input:
+
+                    # loop through each of the articles in the files
+                    for (idx, line) in enumerate(file_input):
+                        # skip until we catch up to the last inserted article
+                        if (idx < article_rec[3]):
+                            continue
+
+                        parse_article(article_id, line, mycursor, mydb, wikiHtmlParser)
+                        break
+    
+    cursor.execute(select_parsed_event, (article_id,))
+    article_events = cursor.fetchall()
+    cursor.execute(select_article_section_link, (article_id,))
+    article_links = cursor.fetchall()
+    cursor.execute(select_article_section_ext_text, (article_id,))
+    article_ext_text = cursor.fetchall()
+    cursor.execute(select_article_section, (article_id,))
+    article_sections = cursor.fetchall()
+
+    return (article_rec, article_sections, article_ext_text, article_links, article_events)
+
+def get_article_search_matches(search, max_results, cursor):
+    if search == "":
+        return []
+    if '%' not in search:
+        search = search + '%'
+
+    #search_articles = """SELECT a.id, title, url, redirect, no_dates, wiki_update_ts, err
+    #    FROM article a
+    #    WHERE title like %s
+    #    LIMIT %s"""
+    search_articles= """select art.title as sub_title,
+            case when rdr.id is not null then rdr.id else art.id end as id,
+            case when rdr.title is not null then rdr.title else art.title end as title,
+            case when rdr.`description` is not null then rdr.`description` else art.`description` end as `description`
+        from article as art
+        left outer join article as rdr  on art.redirect = rdr.title
+        where art.title like %s limit %s"""
+    cursor.execute(search_articles, (search, max_results))
+    return cursor.fetchall()
 
 
 if __name__ == "__main__":
@@ -368,18 +438,19 @@ if __name__ == "__main__":
     json_save_path = config.get('General', 'json_save_path')
 
     mycursor = mydb.cursor()
+    wikiHtmlParser = WikiHtmlParser()
 
     #extract_file_names(html_file_path, mycursor, mydb)
 
     #extract_file_articles(html_file_path, mycursor, mydb)
 
-    #extract_atticle_to_article_tbl(html_file_path, mycursor, mydb)
+    extract_atticle_to_article_tbl(html_file_path, mycursor, mydb, json_save_path)
 
     #extract_tar_files(html_file_path, json_save_path)
 
     #get_article_count(html_file_path, json_save_path)
 
-    extract_article_detail_by_id(6386494, html_file_path, mycursor, mydb, json_save_path)
+    #extract_article_detail_by_id(6386494, html_file_path, mycursor, mydb, json_save_path, wikiHtmlParser)
 
     #create_tar_files(json_save_path)
 

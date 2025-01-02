@@ -1,14 +1,6 @@
-from mwparserfromhtml import HTMLDump
-import html2text
 from dateparser import parse
-import os
 from bs4 import BeautifulSoup
 import spacy, re
-#import en_core_web_trf
-
-# section [ type, text, links, events, parent]
-
-
 
 class WikiHtmlParser:
     def __init__(self):
@@ -49,7 +41,7 @@ class WikiHtmlParser:
         # set a context for some of the items - depending on what a parent is we might generate different strings
         self.parent_context = None
 
-    def parse(self, soup, title):
+    def parse(self, soup : BeautifulSoup, title: str):
         self.reset_parser()
         self.soup = soup
         if (self.soup.find(id="References")):

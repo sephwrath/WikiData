@@ -1,7 +1,7 @@
 
 
 drop table parsed_event;
-drop table article_section_ext_text
+drop table article_section_ext_text;
 drop table article_section_link;
 drop table article_section;
 drop table article;
@@ -20,6 +20,8 @@ CREATE TABLE `dump_file` (
 CREATE TABLE `article` (
     `id` int unsigned NOT NULL AUTO_INCREMENT,
     `title` varchar(400) NOT NULL,
+    `title_srch` varchar(400) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
+    `description` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,
     `update` datetime NOT NULL,
     `dump_file_id` int unsigned,
     `dump_idx` int unsigned,
@@ -34,6 +36,8 @@ CREATE TABLE `article` (
     INDEX `dump_file_id` (`dump_file_id`),
      FOREIGN KEY (dump_file_id) REFERENCES dump_file(ID)
 );
+
+ALTER TABLE test ADD FULLTEXT INDEX `fulltext`(title_srch);
 
 CREATE TABLE `article_section` (
     `article_id` int unsigned NOT NULL,
