@@ -186,6 +186,8 @@ def write_article_lines_to_db(line, dump_id, dump_idx, mycursor):
 # get just the article details for the article_table 
 def extract_atticle_to_article_tbl(file_path, mycursor, mydb, json_save_path):
     prev_run_df = get_missing_dump_details(mycursor)
+    # 0 - dump_idx - the last article inserted into the database
+    # 1 - dump_files - id, file_name, tar_info, offset, offset_data
     
     file_start_offset = prev_run_df[0]
     first_file_id = prev_run_df[1][0][0]
@@ -195,27 +197,27 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb, json_save_path):
         # save the json to a file
         for file_rec in prev_run_df[1]:
 
-            if file_rec[0] > first_file_id:
+            if file_rec['id'] > first_file_id:
                     file_start_offset = -1
 
-            with open(json_save_path + file_rec[1], "r", encoding=tarfile.ENCODING) as file_output:
+            with open(json_save_path + file_rec['file_name'], "r", encoding=tarfile.ENCODING) as file_output:
                 for (idx, line) in enumerate(file_output):
                     if (idx <= file_start_offset):
                         continue
-                    write_article_lines_to_db(line, file_rec[0], idx, mycursor)
+                    write_article_lines_to_db(line, file_rec['id'], idx, mycursor)
     else:
 
         with tarfile.open(file_path, mode="r:gz") as tf:
             for file_rec in prev_run_df[1]:
                 # load the member info from the colum as using get members requires reading the whole tarfile
-                member = tarfile.TarInfo.frombuf(file_rec[2], tarfile.ENCODING, 'surrogateescape')
+                member = tarfile.TarInfo.frombuf(file_rec['tar_info'], tarfile.ENCODING, 'surrogateescape')
                 # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
                 # this seems to be a bug in the Tare file library - TODO submit a bug report
-                member.offset = file_rec[3]
-                member.offset_data = file_rec[4]
+                member.offset = file_rec['offset']
+                member.offset_data = file_rec['offset_data']
 
                 # reset the line offset for subsequent files
-                if file_rec[0] > first_file_id:
+                if file_rec['id'] > first_file_id:
                     file_start_offset = -1
 
                 with tf.extractfile(member) as file_input:
@@ -225,7 +227,7 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb, json_save_path):
                         # skip until we catch up to the last inserted article
                         if (idx <= file_start_offset):
                             continue
-                        write_article_lines_to_db(line, file_rec[0], idx, mycursor)
+                        write_article_lines_to_db(line, file_rec['id'], idx, mycursor)
                     
 
 def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
@@ -289,10 +291,10 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
             ext_type_count = len(section_chunks) - 1
 
             #returned table values - column_span, row_span, row, column, type
-            if 'row' in section:
+            if section['type'] == wikiHtmlParser.TYPE_TABLE_CELL or section['type'] == wikiHtmlParser.TYPE_LIST_ITEM:
                 # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
                 section_tuple = (article_id, sec_idx, section['type'], ext_type_count, section['parent_section'],
-                    section['row'], section['column'], section['row_span'], section['column_span'], section['type'], section_chunks[0])
+                    section['row'], section['column'], section['row_span'], section['column_span'], section['format'], section_chunks[0])
             else:
                 # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
                 section_tuple = (article_id, sec_idx, section['type'], ext_type_count, section['parent_section'],
@@ -353,7 +355,7 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
         print("article {} not found".format(article_id))
         return
 
-    if article_rec[8] != 'UP_TO_DATE':
+    if article_rec['err'] != 'UP_TO_DATE':
         # if it does then delete all the sections, rows, cells and links
         cursor.execute(delete_parsed_event, (article_id,))
         cursor.execute(delete_article_section_link, (article_id,))
@@ -364,27 +366,27 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
         # if we are using the json files then just read the file
         if json_save_path is not None:
             # save the json to a file
-            with open(json_save_path + article_rec[9], "r", encoding=tarfile.ENCODING) as file_output:
+            with open(json_save_path + article_rec['file_name'], "r", encoding=tarfile.ENCODING) as file_output:
                 for (idx, line) in enumerate(file_output):
-                    if (idx < article_rec[3]):
+                    if (idx < article_rec['dump_idx']):
                         continue
                     parse_article(article_id, line, cursor, mydb, wikiHtmlParser)
                     break
         else:
             with tarfile.open(file_path, mode="r:gz") as tf:
                 # load the member info from the colum as using get members requires reading the whole tarfile
-                member = tarfile.TarInfo.frombuf(article_rec[10], tarfile.ENCODING, 'surrogateescape')
+                member = tarfile.TarInfo.frombuf(article_rec['tar_info'], tarfile.ENCODING, 'surrogateescape')
                 # the offset and offset_data are not saved by TarInfo.tobuf() or restored by TarInfo.frombuf() so they need to be set manually
                 # this seems to be a bug in the Tare file library - TODO submit a bug report
-                member.offset = article_rec[11]
-                member.offset_data = article_rec[12]
+                member.offset = article_rec['offset']
+                member.offset_data = article_rec['offset_data']
 
                 with tf.extractfile(member) as file_input:
 
                     # loop through each of the articles in the files
                     for (idx, line) in enumerate(file_input):
                         # skip until we catch up to the last inserted article
-                        if (idx < article_rec[3]):
+                        if (idx < article_rec['dump_idx']):
                             continue
 
                         parse_article(article_id, line, mycursor, mydb, wikiHtmlParser)
@@ -437,7 +439,7 @@ if __name__ == "__main__":
     html_file_path = config.get('General', 'html_file_path')
     json_save_path = config.get('General', 'json_save_path')
 
-    mycursor = mydb.cursor()
+    mycursor = mydb.cursor(dictionary=True)
     wikiHtmlParser = WikiHtmlParser()
 
     #extract_file_names(html_file_path, mycursor, mydb)

@@ -5,8 +5,8 @@ import spacy, re
 class WikiHtmlParser:
     def __init__(self):
         # if _EXT is added to the end then the section is an extension of the last section
-        self.TYPE_MAIN_TITLE = "MAIN_TITLE"
         self.TYPE_MAIN_IMAGE_URL = "MAIN_IMAGE_URL"
+        self.TYPE_HEADDING = "HEADING"
         self.TYPE_TITLE = "TITLE"
         self.TYPE_PARAGRAPH = "PARAGRAPH"
         self.TYPE_IMAGE = "IMAGE"
@@ -17,9 +17,6 @@ class WikiHtmlParser:
         self.TYPE_SUB_SUBTITLE = "SUB_SUBTITLE"
         self.TYPE_LIST = "LIST"
         self.TYPE_LIST_ITEM = "LIST_ITEM"
-        self.LIST_TYPE_BULLETED = "BULLETED"
-        self.LIST_TYPE_NUMBERED = "NUMBERED"
-        self.LIST_TYPE_INDENTED = "INDENTED"
 
 
         self.p = re.compile(r'\[\d+\]')
@@ -49,7 +46,7 @@ class WikiHtmlParser:
         if (self.soup.find(id="External_links")):
             self.soup.find(id="External_links").findParent(name="section").clear()
         # title is added as the first section
-        parent_section = self.generateSection(self.TYPE_TITLE, None, title)
+        parent_section = self.generateSection(self.TYPE_HEADDING, None, title)
 
         self.parseChildren(self.soup.find('body'), parent_section, 0)
 
@@ -72,13 +69,7 @@ class WikiHtmlParser:
         # don't include links to files or non existant pages
         if not (linkText.startswith("./File:") or 'redlink=1' in linkText):
         
-            if (self.parent_context == self.TYPE_TABLE):
-                self.sectionLinks.append({ 'section': len(self.saveSections)-1,
-                                   'article': linkText, 'start': (self.linkOffset + 1),
-                                    'end': (self.linkOffset + len(strippedText) + 1),
-                                    'column': len(self.currentRow), 'row': len(self.tableRows) } )
-            else:
-                self.sectionLinks.append({ 'section': len(self.saveSections)-1,
+            self.sectionLinks.append({ 'section': len(self.saveSections)-1,
                                    'article': linkText, 'start': (self.linkOffset + 1),
                                     'end': (self.linkOffset + len(strippedText) + 1) } )
 
@@ -150,7 +141,14 @@ class WikiHtmlParser:
             return ""
 
         elif (node.name == "li" or node.name == "dt" or node.name == "dd"):
-            return self.parseChildren(node, p_section, " - ", "\n")
+            p_section = self.generateSection(self.TYPE_LIST_ITEM, p_section)
+            cell_text = self.parseChildren(node, p_section)
+            self.saveSections[p_section]['text'] = cell_text
+            self.saveSections[p_section]['column_span'] = None
+            self.saveSections[p_section]['row_span'] = None
+            self.saveSections[p_section]['row'] = None
+            self.saveSections[p_section]['column'] = None
+            self.saveSections[p_section]['format'] = node.name
         
         elif (node.name == "blockquote"):
             return self.parseChildren(node, p_section, " > ")
@@ -182,7 +180,7 @@ class WikiHtmlParser:
             self.saveSections[p_section]['row_span'] = row_span
             self.saveSections[p_section]['row'] = self.tableCounts[self.nestingDepth]['row']
             self.saveSections[p_section]['column'] = self.tableCounts[self.nestingDepth]['column']
-            self.saveSections[p_section]['type'] = node.name
+            self.saveSections[p_section]['format'] = node.name
 
 
             self.tableCounts[self.nestingDepth]['column'] += 1
