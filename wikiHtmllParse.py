@@ -45,6 +45,10 @@ class WikiHtmlParser:
             self.soup.find(id="References").findParent(name="section").clear()
         if (self.soup.find(id="External_links")):
             self.soup.find(id="External_links").findParent(name="section").clear()
+        if (self.soup.find(id="Bibliography")):
+            self.soup.find(id="Bibliography").findParent(name="section").clear()
+        if (self.soup.find(id="Citations")):
+            self.soup.find(id="Citations").findParent(name="section").clear()
         # title is added as the first section
         parent_section = self.generateSection(self.TYPE_HEADDING, None, title)
 
@@ -70,8 +74,8 @@ class WikiHtmlParser:
         if not (linkText.startswith("./File:") or 'redlink=1' in linkText):
         
             self.sectionLinks.append({ 'section': len(self.saveSections)-1,
-                                   'article': linkText, 'start': (self.linkOffset + 1),
-                                    'end': (self.linkOffset + len(strippedText) + 1) } )
+                                   'article': linkText, 'start': (self.linkOffset ),
+                                    'end': (self.linkOffset + len(strippedText) ) } )
 
         return strippedText
     
@@ -143,6 +147,8 @@ class WikiHtmlParser:
         elif (node.name == "li" or node.name == "dt" or node.name == "dd"):
             p_section = self.generateSection(self.TYPE_LIST_ITEM, p_section)
             cell_text = self.parseChildren(node, p_section)
+            if (node.text.strip() != ""):
+                cell_text = node.text + cell_text
             self.saveSections[p_section]['text'] = cell_text
             self.saveSections[p_section]['column_span'] = None
             self.saveSections[p_section]['row_span'] = None
@@ -207,10 +213,10 @@ class WikiHtmlParser:
             if (len(section["text"]) > 2):
                 self.extract_events_spacy(str(section["text"]), idx)
 
-    def generateEvent(self, idx, rowIdx, columnIdx, date, startPos, endPos, dText, desc):
+    def generateEvent(self, idx, date, startPos, endPos, dText, desc):
         self.linkOffset = 0
         self.currentSection == None
-        nodeSection =  { 'section': idx, 'rowIdx': rowIdx, 'columnIdx': columnIdx, 'date': date, 'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
+        nodeSection =  { 'section': idx, 'date': date, 'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
     
         if (nodeSection):
             self.sectionEvents.append(nodeSection)
@@ -225,7 +231,7 @@ class WikiHtmlParser:
             return ""
 
 
-    def extract_events_spacy(self, text, idx, rowIdx=None, columnIdx=None):
+    def extract_events_spacy(self, text, idx, time_parser):
         """
     	Extracts date time events using the Spacy library.
     	
@@ -234,34 +240,45 @@ class WikiHtmlParser:
     	:param rowIdx: The row index.
     	:param columnIdx: The column index.
     	"""
-
+        parsed_date = None
         doc = self.nlp(text)
         for ent in filter(lambda e: e.label_ == 'DATE' or e.label_ == 'TIME', doc.ents):
-            self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
-
-            #start = parse(ent.text)
-            #if start == None:
-                # could not parse the dates, hence ignore it
-            #    self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
-                #print('Event Discarded: ' + ent.text)
-            #else:
-            #    self.generateEvent( idx, rowIdx, columnIdx, None, ent.start_char, ent.end_char, ent.text, None)
-                # current = ent.root
-                # desc = ""
-                # while current.dep_ != "ROOT":
-                #     current = current.head
-                #     desc = " ".join(filter(None, [
-                #         self.dep_subtree(current, "nsubj"),
-                #         self.dep_subtree(current, "nsubjpass"),
-                #         self.dep_subtree(current, "auxpass"),
-                #         self.dep_subtree(current, "amod"),
-                #         self.dep_subtree(current, "det"),
-                #         current.text,
-                #         self.dep_subtree(current, "acl"),
-                #         self.dep_subtree(current, "dobj"),
-                #         self.dep_subtree(current, "attr"),
-                #         self.dep_subtree(current, "advmod")]))
-                # self.generateEvent(idx, rowIdx, columnIdx, start, ent.start_char, ent.end_char, ent.text, desc)
+            parsed_date = self.parse_date(ent.text, parsed_date, time_parser)
+            if parsed_date == None:
+                self.generateEvent( idx, None, ent.start_char, ent.end_char, ent.text, None)
+            else:
+                current = ent.root
+                desc = ""
+                while current.dep_ != "ROOT":
+                    current = current.head
+                    desc = " ".join(filter(None, [
+                        self.dep_subtree(current, "nsubj"),
+                        self.dep_subtree(current, "nsubjpass"),
+                        self.dep_subtree(current, "auxpass"),
+                        self.dep_subtree(current, "amod"),
+                        self.dep_subtree(current, "det"),
+                        current.text,
+                        self.dep_subtree(current, "acl"),
+                        self.dep_subtree(current, "dobj"),
+                        self.dep_subtree(current, "attr"),
+                        self.dep_subtree(current, "advmod")]))
+                self.generateEvent( idx, parsed_date, ent.start_char, ent.end_char, ent.text, desc)
         return
+    
+    def parse_date(self, date_text, reference_date, time_parser):
+        try:
+            if reference_date:
+                time_parser.set_refrence_date(reference_date.to_datetime('start'), reference_date.grain)
+            date = time_parser.parse(date_text)
+
+            print("result: " + str(date))
+            return date
+
+        except Exception as e:
+            #msg = str(e)
+            #if (hasattr(e, 'msg')):
+            print(str(e), " ", date_text)
+            #else:
+            #    raise (e)
 
 

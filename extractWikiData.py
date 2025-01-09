@@ -6,11 +6,20 @@ import html2text
 from bs4 import BeautifulSoup
 import re
 import os
+import sys
 import datetime as dt
 import time
 import configparser
 
+sys.path.append("./date-finder/dt_rd_parser")
+
+from dt_rd_parser.timeParser import TimeParser
+
+
+
 ALGORYTHM_UPDATE_DATE = dt.datetime.strptime('2024-12-27', '%Y-%m-%d')
+
+time_parser = TimeParser()
 
 
 
@@ -239,7 +248,6 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
     insert_article_section_ext_text = "INSERT INTO article_section_ext_text (article_id, section_id, count_id, text) values (%s, %s, %s, %s)"
     insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, start_pos, end_pos, link) values (%s, %s, %s, %s, %s);"
-    insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
 
     # timing variables
     t_s = 0
@@ -264,13 +272,13 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
     parsed_html = BeautifulSoup(raw_html, features="html.parser")
                         
     wikiHtmlParser.parse(parsed_html, title)
-    wikiHtmlParser.parseEvents()
+    #wikiHtmlParser.parseEvents()
     print("parsing: {}, sections {}, events {}, links {}".format(title, len(wikiHtmlParser.saveSections), len(wikiHtmlParser.sectionEvents), len(wikiHtmlParser.sectionLinks)))
 
     # insert the article sections and events
     # if the no events then don't insert the sections etc just add the article info
-    if len(wikiHtmlParser.sectionEvents) > 0 or len(wikiHtmlParser.sectionLinks) > 0:
-        no_events = False
+    #if len(wikiHtmlParser.sectionEvents) > 0 or len(wikiHtmlParser.sectionLinks) > 0:
+    #    no_events = False
 
     if not no_events:
         # insert the article sections
@@ -311,15 +319,6 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
             section_links.append((article_id, link['section'], link['start'], link['end'], link['article']))
         if len(section_links) > 0:
             mycursor.executemany(insert_article_section_link, section_links)
-
-        parsed_events = []
-        for section in wikiHtmlParser.sectionEvents:
-            # (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text
-            # event = { 'section': idx,  'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
-            parsed_events.append((article_id, section['section'], None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
-            
-        if len(parsed_events) > 0:
-            mycursor.executemany(insert_parsed_event, parsed_events)
             
     insert_values = (now_time, redirect, no_events, 'UP_TO_DATE', article_id)
     mycursor.execute(update_article, insert_values)
@@ -402,6 +401,42 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
     article_sections = cursor.fetchall()
 
     return (article_rec, article_sections, article_ext_text, article_links, article_events)
+
+def extract_remaining_article_sections_by_id(article_id, cursor):
+    select_article_section = "select article_id, section_id, text from article_section where article_id = %s and is_parsed is null"
+    select_article_section_ext_text = """SELECT aset.article_id as article_id, aset.section_id, aset.count_id, aset.text
+        FROM article_section_ext_text aset
+        inner join article_section asect on aset.article_id = asect.article_id and aset.section_id = asect.section_id
+        where asect.is_parsed is null and aset.article_id = %s"""
+    
+    cursor.execute(select_article_section, (article_id,))
+    remaining_sections = cursor.fetchall()
+    ext_text = cursor.execute(select_article_section_ext_text, (article_id,))
+    remaining_ext_text = cursor.fetchall()
+    for ext_text in remaining_ext_text:
+        section = next(filter(lambda s: s['section_id'] == ext_text['section_id'], remaining_sections), None)
+        if section is not None:
+            section['text'] = section['text'] + ext_text['text']
+    return remaining_sections
+
+def parse_section_events(article_id, section_id, section_text, mydb, mycursor, wikiHtmlParser):
+    insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+    update_section = "UPDATE article_section SET is_parsed = 'Y' WHERE article_id = %s and section_id = %s"
+    wikiHtmlParser.sectionEvents = []
+    wikiHtmlParser.extract_events_spacy(section_text, section_id)
+
+    parsed_events = []
+    for section in wikiHtmlParser.sectionEvents:
+        # (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text
+        # event = { 'section': idx,  'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
+        parsed_events.append((article_id, section['section'], None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
+        
+    if len(parsed_events) > 0:
+        mycursor.executemany(insert_parsed_event, parsed_events)
+        mycursor.execute(update_section, (article_id, section_id))
+        mydb.commit()
+
+    return wikiHtmlParser.sectionEvents
 
 def get_article_search_matches(search, max_results, cursor):
     if search == "":

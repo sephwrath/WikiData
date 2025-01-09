@@ -10,7 +10,7 @@ import sys
  
 # append the path of the
 # parent directory
-sys.path.append("C:/Users/stephen/Documents/Projects/date-finder/dt_rd_parser")
+sys.path.append("./date-finder/dt_rd_parser")
 
 from dt_rd_parser.timeParser import TimeParser
 
@@ -54,14 +54,10 @@ def extract_dates_from_db(cursor, mydb):
 
             mycursor.execute(update_parsed_event, (date.to_timestamp('start'), date.to_timestamp('end'), pe_id))
             
-
             last_article_date = date
             last_article_id = article_id
 
-            
-
             print("result: " + str(date))
-
 
 
         except Exception as e:
@@ -96,7 +92,7 @@ if __name__ == "__main__":
 
     config = configparser.ConfigParser()
     config.read('config.ini')
-    
+
     mydb = mysql.connector.connect(
             host=config.get('General', 'host'),
             user=config.get('General', 'user'),

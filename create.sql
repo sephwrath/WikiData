@@ -51,6 +51,7 @@ CREATE TABLE `article_section` (
     `tag` varchar(40) NOT NULL,
     `format` varchar(200),
     `text` varchar(15000),
+    `is_parsed` char(1),
     PRIMARY KEY (`article_id`,`section_id`),
     INDEX `article_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID)
