@@ -1,4 +1,5 @@
 import mysql.connector
+import mysql
 import configparser
 
 import re
@@ -7,16 +8,18 @@ import datetime as dt
 
 # import requi9red module
 import sys
+
+import mysql.connector.cursor
  
 # append the path of the
 # parent directory
 sys.path.append("./date-finder/dt_rd_parser")
 
-from dt_rd_parser.timeParser import TimeParser
+from ..dt_rd_parser.timeParser import TimeParser
 
 
 
-def extract_dates_from_db(cursor, mydb):
+def extract_dates_from_db(cursor : mysql.connector.cursor.MySQLCursor, mydb : mysql.connector.connection.MySQLConnection):
 
     update_parsed_event = """UPDATE wikidata.parsed_event SET start_date = %s, end_date = %s where id = %s;"""
     mycursor.execute("""select article_id, section_id, date_text, start_pos, end_pos, id 

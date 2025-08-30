@@ -1,7 +1,8 @@
 import tarfile
-import mysql.connector
+from mysql.connector import (connection, cursor)
+#from mysql import MySQLConnection, MySQLCursor, MySQLCursorDict
 import json
-from .wikiHtmllParse import WikiHtmlParser
+from .wikiHtmllParse import WikiHtmlParser, NodeSection, Event, Formatt
 import html2text
 from bs4 import BeautifulSoup
 import re
@@ -23,7 +24,7 @@ time_parser = TimeParser()
 
 
 
-def extract_file_names(file_path, cursor, mydb):
+def extract_file_names(file_path: str, cursor : cursor.MySQLCursor, mydb: connection.MySQLConnection):
     """
     Extracts file names and member data from a tar.gz file and inserts them into a MySQL database
     so that the individual files in the tar file can be acessed in any order without needing to read the entire file.
@@ -58,7 +59,7 @@ def extract_file_names(file_path, cursor, mydb):
                     cursor.execute(sql_ins_dump_file, val)
                 mydb.commit()
 
-def get_missing_dump_details(mycursor):
+def get_missing_dump_details(mycursor : cursor.MySQLCursor):
 
     """
     Retrieves details of the last inserted articles dump file and gets all the dump files after that
@@ -91,7 +92,7 @@ def get_missing_dump_details(mycursor):
         
     return (dump_index, dump_files)
 
-def get_article_count(file_path,mycursor):
+def get_article_count(file_path : str, mycursor : cursor.MySQLCursor):
 
     prev_run_df = get_missing_dump_details(mycursor)
 
@@ -108,7 +109,7 @@ def get_article_count(file_path,mycursor):
 
             print("{} articles in {}".format(num_lines, file_rec[1]))
 
-def extract_tar_files(tar_path, save_path):
+def extract_tar_files(tar_path : str, save_path : str):
     files = os.listdir(save_path)
     with tarfile.open(tar_path, mode="r:gz") as tf:
         while True:
@@ -121,7 +122,7 @@ def extract_tar_files(tar_path, save_path):
                         with open(save_path + member.name, "wb") as file_output:
                             file_output.write(file_input.read())
 
-def create_tar_files(save_path):
+def create_tar_files(save_path : str):
     files = os.listdir(save_path)
 
     for file in files:
@@ -133,7 +134,7 @@ def create_tar_files(save_path):
 
         os.remove(save_path + file)
 
-def write_article_lines_to_db(line, dump_id, dump_idx, mycursor):
+def write_article_lines_to_db(line : str, dump_id : int, dump_idx : int, mycursor : cursor.MySQLCursor):
     insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates, wiki_update_ts, description) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
     # timing variables
@@ -193,7 +194,7 @@ def write_article_lines_to_db(line, dump_id, dump_idx, mycursor):
 
 
 # get just the article details for the article_table 
-def extract_atticle_to_article_tbl(file_path, mycursor, mydb, json_save_path):
+def extract_atticle_to_article_tbl(file_path : str, mycursor : cursor.MySQLCursor, json_save_path : str) -> None:
     prev_run_df = get_missing_dump_details(mycursor)
     # 0 - dump_idx - the last article inserted into the database
     # 1 - dump_files - id, file_name, tar_info, offset, offset_data
@@ -239,7 +240,7 @@ def extract_atticle_to_article_tbl(file_path, mycursor, mydb, json_save_path):
                         write_article_lines_to_db(line, file_rec['id'], idx, mycursor)
                     
 
-def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
+def parse_article(article_id : int, line : str, mycursor : cursor.MySQLCursor, mydb : connection.MySQLConnection, wikiHtmlParser : WikiHtmlParser):
     #insert_article = "INSERT INTO article (title, `update`, dump_file_id, dump_idx, url, redirect, no_dates) VALUES (%s, %s, %s, %s, %s, %s, %s)"
     update_article = "UPDATE article SET `update` = %s, redirect = %s, no_dates = %s, err = %s WHERE id = %s"
 
@@ -247,7 +248,7 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
         row_idx, column_idx, row_span, column_span, format, text) 
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
     insert_article_section_ext_text = "INSERT INTO article_section_ext_text (article_id, section_id, count_id, text) values (%s, %s, %s, %s)"
-    insert_article_section_link = "INSERT INTO article_section_link (article_id, section_id, start_pos, end_pos, link) values (%s, %s, %s, %s, %s);"
+    insert_article_section_format = "INSERT INTO article_section_format (article_id, section_id, format, start_pos, end_pos, link) values (%s, %s, %s, %s, %s);"
 
     # timing variables
     t_s = 0
@@ -273,52 +274,46 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
                         
     wikiHtmlParser.parse(parsed_html, title)
     #wikiHtmlParser.parseEvents()
-    print("parsing: {}, sections {}, events {}, links {}".format(title, len(wikiHtmlParser.saveSections), len(wikiHtmlParser.sectionEvents), len(wikiHtmlParser.sectionLinks)))
+    print("parsing: {}, sections {}, events {}, links {}".format(title, len(wikiHtmlParser.saveSections), len(wikiHtmlParser.sectionEvents), len(wikiHtmlParser.sectionFormats)))
 
-    # insert the article sections and events
-    # if the no events then don't insert the sections etc just add the article info
-    #if len(wikiHtmlParser.sectionEvents) > 0 or len(wikiHtmlParser.sectionLinks) > 0:
-    #    no_events = False
+    # insert the article sections
+    insert_table_columns = []
+    for (sec_idx, section) in enumerate(wikiHtmlParser.saveSections):
+        # (article_id, section_id `tag`, `text`)
+        #{ 'type': type, 'text': text }
+        # split the section text into chunks for saving in the database
+        section_text = section.text
+        section_chunks = []
+        if section_text == "":
+            section_chunks.append("")
+        else:
+            while section_text:
+                chunk, section_text = section_text[:14000], section_text[14000:]
+                section_chunks.append(chunk)
+        
+        ext_type_count = len(section_chunks) - 1
 
-    if not no_events:
-        # insert the article sections
-        insert_table_columns = []
-        for (sec_idx, section) in enumerate(wikiHtmlParser.saveSections):
-            # (article_id, section_id `tag`, `text`)
-            #{ 'type': type, 'text': text }
-            # split the section text into chunks for saving in the database
-            section_text = section['text']
-            section_chunks = []
-            if section_text == "":
-                section_chunks.append("")
-            else:
-                while section_text:
-                    chunk, section_text = section_text[:14000], section_text[14000:]
-                    section_chunks.append(chunk)
-            
-            ext_type_count = len(section_chunks) - 1
+        #returned table values - column_span, row_span, row, column, type
+        if section.type == wikiHtmlParser.TYPE_TABLE_CELL or section.type == wikiHtmlParser.TYPE_LIST_ITEM:
+            # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
+            section_tuple = (article_id, sec_idx, section.type, ext_type_count, section.parent_section,
+                section.row, section.column, section.row_span, section.column_span, section.format, section_chunks[0])
+        else:
+            # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
+            section_tuple = (article_id, sec_idx, section.type, ext_type_count, section.parent_section,
+                None, None, None, None, None, section_chunks[0])
+        
+        mycursor.execute(insert_article_section, section_tuple)
 
-            #returned table values - column_span, row_span, row, column, type
-            if section['type'] == wikiHtmlParser.TYPE_TABLE_CELL or section['type'] == wikiHtmlParser.TYPE_LIST_ITEM:
-                # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
-                section_tuple = (article_id, sec_idx, section['type'], ext_type_count, section['parent_section'],
-                    section['row'], section['column'], section['row_span'], section['column_span'], section['format'], section_chunks[0])
-            else:
-                # (article_id, section_id, tag, ext_text_count, parent_section_id, row_idx, column_idx, row_span, column_span, format, text)
-                section_tuple = (article_id, sec_idx, section['type'], ext_type_count, section['parent_section'],
-                    None, None, None, None, None, section_chunks[0])
-            
-            mycursor.execute(insert_article_section, section_tuple)
+        for (chunk_idx, section_chunk) in enumerate(section_chunks[1:]):
+            mycursor.execute(insert_article_section_ext_text, (article_id, sec_idx, chunk_idx, section_chunk))
 
-            for (chunk_idx, section_chunk) in enumerate(section_chunks[1:]):
-                mycursor.execute(insert_article_section_ext_text, (article_id, sec_idx, chunk_idx, section_chunk))
-
-        section_links = []
-        for link in wikiHtmlParser.sectionLinks:
-            # (article_id, section_id, start_pos, end_pos, link)                
-            section_links.append((article_id, link['section'], link['start'], link['end'], link['article']))
-        if len(section_links) > 0:
-            mycursor.executemany(insert_article_section_link, section_links)
+    section_formats = []
+    for link in wikiHtmlParser.sectionFormats:
+        # (article_id, section_id, start_pos, end_pos, link)                
+        section_formats.append((article_id, link.section, link.format, link.start, link.end, link.article))
+    if len(section_formats) > 0:
+        mycursor.executemany(insert_article_section_format, section_formats)
             
     insert_values = (now_time, redirect, no_events, 'UP_TO_DATE', article_id)
     mycursor.execute(update_article, insert_values)
@@ -330,7 +325,9 @@ def parse_article(article_id, line, mycursor, mydb, wikiHtmlParser):
     print("title: {}, processing time: {}.".format(title, t_tot))
 
 
-def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_path = None, wikiHtmlParser = WikiHtmlParser()):
+def extract_article_detail_by_id(article_id: int, file_path : str, cursor : cursor.MySQLCursor, 
+                                 mydb : connection.MySQLConnection, json_save_path : str = None, 
+                                 wikiHtmlParser : WikiHtmlParser = WikiHtmlParser(), force : bool = False):
 
     select_article = """select a.id, title, `update`, dump_idx, url, redirect, no_dates, wiki_update_ts, err, 
         df.file_name, df.tar_info, df.offset, df.offset_data
@@ -339,12 +336,12 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
         and a.id = %s"""
     delete_article_section = "delete from article_section where article_id = %s"
     delete_article_section_ext_text = "delete from article_section_ext_text where article_id = %s"
-    delete_article_section_link = "delete from article_section_link where article_id = %s"
+    delete_article_section_format = "delete from article_section_format where article_id = %s"
     delete_parsed_event = "delete from parsed_event where article_id = %s"
 
     select_article_section = "select * from article_section where article_id = %s"
     select_article_section_ext_text = "select * from article_section_ext_text where article_id = %s"
-    select_article_section_link = "select * from article_section_link where article_id = %s"
+    select_article_section_format = "select * from article_section_format where article_id = %s"
     select_parsed_event = "select * from parsed_event where article_id = %s"
     # check if the article needs to be updated
     cursor.execute(select_article, (article_id,))
@@ -354,10 +351,10 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
         print("article {} not found".format(article_id))
         return
 
-    if article_rec['err'] != 'UP_TO_DATE':
+    if article_rec['err'] != 'UP_TO_DATE' or force:
         # if it does then delete all the sections, rows, cells and links
         cursor.execute(delete_parsed_event, (article_id,))
-        cursor.execute(delete_article_section_link, (article_id,))
+        cursor.execute(delete_article_section_format, (article_id,))
         cursor.execute(delete_article_section_ext_text, (article_id,))
         cursor.execute(delete_article_section, (article_id,))
         mydb.commit()
@@ -393,7 +390,7 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
     
     cursor.execute(select_parsed_event, (article_id,))
     article_events = cursor.fetchall()
-    cursor.execute(select_article_section_link, (article_id,))
+    cursor.execute(select_article_section_format, (article_id,))
     article_links = cursor.fetchall()
     cursor.execute(select_article_section_ext_text, (article_id,))
     article_ext_text = cursor.fetchall()
@@ -402,7 +399,7 @@ def extract_article_detail_by_id(article_id, file_path, cursor, mydb, json_save_
 
     return (article_rec, article_sections, article_ext_text, article_links, article_events)
 
-def extract_remaining_article_sections_by_id(article_id, cursor):
+def extract_remaining_article_sections_by_id(article_id : int, cursor : cursor.MySQLCursor):
     select_article_section = "select article_id, section_id, text from article_section where article_id = %s and is_parsed is null"
     select_article_section_ext_text = """SELECT aset.article_id as article_id, aset.section_id, aset.count_id, aset.text
         FROM article_section_ext_text aset
@@ -416,10 +413,11 @@ def extract_remaining_article_sections_by_id(article_id, cursor):
     for ext_text in remaining_ext_text:
         section = next(filter(lambda s: s['section_id'] == ext_text['section_id'], remaining_sections), None)
         if section is not None:
-            section['text'] = section['text'] + ext_text['text']
+            section.text = section['text'] + ext_text['text']
     return remaining_sections
 
-def parse_section_events(article_id, section_id, section_text, mydb, mycursor, wikiHtmlParser):
+def parse_section_events(article_id : int, section_id : int, section_text : str, mydb : connection.MySQLConnection, 
+                         mycursor : cursor.MySQLCursor, wikiHtmlParser : WikiHtmlParser):
     insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
     update_section = "UPDATE article_section SET is_parsed = 'Y' WHERE article_id = %s and section_id = %s"
     wikiHtmlParser.sectionEvents = []
@@ -429,7 +427,7 @@ def parse_section_events(article_id, section_id, section_text, mydb, mycursor, w
     for section in wikiHtmlParser.sectionEvents:
         # (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text
         # event = { 'section': idx,  'startPos': startPos, 'endPos': endPos, 'dText': dText, 'desc': desc }
-        parsed_events.append((article_id, section['section'], None, None, section['dText'], section['startPos'], section['endPos'], section['desc']))
+        parsed_events.append((article_id, section.section, None, None, section.dText, section.startPos, section.endPos, section.desc))
         
     if len(parsed_events) > 0:
         mycursor.executemany(insert_parsed_event, parsed_events)
@@ -438,7 +436,7 @@ def parse_section_events(article_id, section_id, section_text, mydb, mycursor, w
 
     return wikiHtmlParser.sectionEvents
 
-def get_article_search_matches(search, max_results, cursor):
+def get_article_search_matches(search : str, max_results : int, cursor : cursor.MySQLCursor):
     if search == "":
         return []
     if '%' not in search:
@@ -464,7 +462,7 @@ if __name__ == "__main__":
     config = configparser.ConfigParser()
     config.read('config.ini')
 
-    mydb = mysql.connector.connect(
+    mydb = connection.MySQLConnection.connect(
             host=config.get('General', 'host'),
             user=config.get('General', 'user'),
             password=config.get('General', 'password'),
@@ -481,7 +479,7 @@ if __name__ == "__main__":
 
     #extract_file_articles(html_file_path, mycursor, mydb)
 
-    extract_atticle_to_article_tbl(html_file_path, mycursor, mydb, json_save_path)
+    extract_atticle_to_article_tbl(html_file_path, mycursor, json_save_path)
 
     #extract_tar_files(html_file_path, json_save_path)
 

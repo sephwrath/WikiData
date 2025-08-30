@@ -9,3 +9,5 @@ __pycache__/temporalParse.cpython-311.pyc
 __pycache__/wikiarticles.cpython-39.pyc
 Tests/htmltest.html
 Tests/textconv.md
+__pycache__/extractWikiData.cpython-311.pyc
+__pycache__/wikiHtmllParse.cpython-311.pyc

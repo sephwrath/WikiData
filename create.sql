@@ -3,6 +3,7 @@
 drop table parsed_event;
 drop table article_section_ext_text;
 drop table article_section_link;
+drop table article_section_format;
 drop table article_section;
 drop table article;
 --drop table dump_file;
@@ -69,6 +70,22 @@ CREATE TABLE `article_section_link` (
     FOREIGN KEY (article_id) REFERENCES article(ID),
     FOREIGN KEY (article_id, section_id) REFERENCES article_section(article_id, `section_id`)
 );
+
+
+CREATE TABLE `article_section_format` (
+    `id` int unsigned NOT NULL AUTO_INCREMENT,
+    `article_id` int unsigned NOT NULL,
+    `section_id` int unsigned NOT NULL,
+    `start_pos` int NOT NULL, -- the index into the text where the link starts
+    `end_pos` int NOT NULL, -- the index into the text where the link ends
+    `format` varchar(64) NOT NULL,
+    `link` varchar(1000) NOT NULL,
+    PRIMARY KEY (`id`),
+    INDEX `article_section_format_id_idx` (`article_id`),
+    FOREIGN KEY (article_id) REFERENCES article(ID),
+    FOREIGN KEY (article_id, section_id) REFERENCES article_section(article_id, `section_id`)
+);
+
 
 -- table to contain any extended text that won't fit in cells or article sections
 CREATE TABLE `article_section_ext_text` (
