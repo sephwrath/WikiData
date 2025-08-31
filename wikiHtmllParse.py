@@ -102,42 +102,47 @@ class WikiHtmlParser:
         self.saveSections.append(nodeSection)
         return len(self.saveSections) - 1
     
-    def setSectionText(self, sectionIndex : int, text : str):
-        self.saveSections[sectionIndex].text = text
 
     def generateFormatText(self, linkNode : Tag , format: str, parent_section: NodeSection=None) -> str:
-        retText = ""
-        if (format == 'A'):
+        retText = linkNode.text.strip()
+        (startText, endText) = self.appendNodeText(retText)
+        if (format == 'a'):
             linkText = linkNode.attrs['href']
             # don't include links to files or non existant pages
             if not (linkText.startswith("./File:") or 'redlink=1' in linkText):
-                retText = linkNode.text.strip()
-            
-                self.selectionFormats.append(Formatt(section=len(self.saveSections)-1, format=format,
-                                        article=linkText, start=(self.linkOffset),
-                                            end=(self.linkOffset + len(retText) ) ) )
+                self.sectionFormats.append(Formatt(section=len(self.saveSections)-1, format=format,
+                                        article=linkText, start=startText, end=endText ) )
         else:
-            startText = self.linkOffset
-            formatObj = Formatt(len(self.saveSections)-1, format, None, startText, None)
-                
+            formatObj = Formatt(len(self.saveSections)-1, format, None, startText, endText)
             self.sectionFormats.append(formatObj)
-            retText = self.parseChildren(linkNode, parent_section)
-            formatObj.end = (startText + len(retText))
 
         return retText
     
-    def parseChildren(self, node, parent_section: NodeSection=None) -> str:
-        for sectionChild in node.children:
-            if len(self.nodeText) > 0 and len(node.text) > 0 and not (self.nodeText[0].isspace() or node.text[-1].isspace()):
+    def useNodeText(self) -> str:
+        retText = self.nodeText
+        self.nodeText = ""
+        self.linkOffset = 0
+        return retText
+    
+    def appendNodeText(self, text: str) -> None:
+        
+        childText = text.strip()
+        #endChar = False
+        #if len(self.nodeText) > 0 and self.nodeText[-1] in ['.', '!', '?']:
+        #    endChar = True
+        if len(self.nodeText) > 0 and len(childText) > 0:  #and not endChar:
                 self.nodeText += " "
-            childText = self.parseNodes(sectionChild, parent_section)
-            self.nodeText += childText
-            self.linkOffset = len(self.nodeText)
-
-        if self.nodeText.strip() == "":
-            return ""
+                self.linkOffset += 1
+        self.nodeText += childText
+        retStart = self.linkOffset
         self.linkOffset = len(self.nodeText)
-        return self.nodeText
+        retEnd = self.linkOffset
+        return (retStart, retEnd)
+    
+    def parseChildren(self, node, parent_section: NodeSection=None) -> None:
+        for sectionChild in node.children:
+            self.parseNodes(sectionChild, parent_section)
+        return
 
     def parseNodes(self,node, parent_section=None) -> str:
         nodeText = ""
@@ -145,55 +150,58 @@ class WikiHtmlParser:
         # print(node.name)
         if (node.name == None):
             if node.text.startswith("<span"):
-                return ""
-            return node.text.strip()
+                return
+            self.appendNodeText(node.text)
+            return
         if (node.name == "p"):
             self.parent_context = self.TYPE_PARAGRAPH
             self.currentSection = self.TYPE_PARAGRAPH
             new_section = self.generateSection(self.TYPE_PARAGRAPH, p_section)
-            nodeText = self.parseChildren(node, new_section)
-            
-            self.setSectionText(new_section, nodeText)
+            self.parseChildren(node, new_section)
+            self.saveSections[new_section].text = self.useNodeText()
+            return
 
         elif (node.name == "a"):
-            return self.generateFormatText(node, 'a')
+            self.generateFormatText(node, 'a')
+            return
         
         elif (node.name == "b" or node.name == "strong"):
-            return self.generateFormatText(node, 'b', p_section)
-            #return self.parseChildren(node, p_section)
+            self.generateFormatText(node, 'b', p_section)
+            return
         
         elif (node.name == "i" or node.name == "em"):
-            return self.generateFormatText(node, 'i', p_section)
-            #return self.parseChildren(node, p_section, " * ", " * ")
+            self.generateFormatText(node, 'i', p_section)
+            return
             
         elif (node.name == "h2"):
-            p_section = self.generateSection(self.TYPE_TITLE, p_section, node.text.strip())
+            # added as a section
+            self.generateSection(self.TYPE_TITLE, p_section, node.text.strip())
 
         elif (node.name == "h3"):
-            p_section = self.generateSection(self.TYPE_SUBTITLE, p_section, node.text.strip())
+            # added as a section
+            self.generateSection(self.TYPE_SUBTITLE, p_section, node.text.strip())
 
         elif (node.name == "h4"):
-            p_section = self.generateSection(self.TYPE_SUB_SUBTITLE, p_section, node.text.strip())
+            # added as a section
+            self.generateSection(self.TYPE_SUB_SUBTITLE, p_section, node.text.strip())
 
         elif (node.name == "section"):
-            return self.parseChildren(node, p_section)
-            #if nodeText != "":
-            #    self.generateSection(self.TYPE_PARAGRAPH, nodeText)
+            # not added as a node
+            self.parseChildren(node, p_section)
+
         elif (node.name == "span" or node.name == "abbr" or node.name == "u" or node.name == "div"):
-            return self.parseChildren(node, p_section)
+            self.parseChildren(node, p_section)
 
         elif (node.name == "ul" or node.name == "ol" or node.name == "dl"):
             p_section = self.generateSection(self.TYPE_LIST, p_section)
-            nodeText = self.parseChildren(node, p_section)
-            self.setSectionText(p_section, nodeText)
-            return ""
+            self.parseChildren(node, p_section)
+            self.saveSections[p_section].text = self.useNodeText()
+            return
 
         elif (node.name == "li" or node.name == "dt" or node.name == "dd"):
             p_section = self.generateSection(self.TYPE_LIST_ITEM, p_section)
-            cell_text = self.parseChildren(node, p_section)
-            if (node.text.strip() != ""):
-                cell_text = cell_text
-            self.saveSections[p_section].text = cell_text
+            self.parseChildren(node, p_section)
+            self.saveSections[p_section].text = self.useNodeText()
             self.saveSections[p_section].column_span = None
             self.saveSections[p_section].row_span = None
             self.saveSections[p_section].row = None
@@ -201,14 +209,14 @@ class WikiHtmlParser:
             self.saveSections[p_section].format = node.name
         
         elif (node.name == "blockquote"):
-            return self.generateFormatText(node, 'blockquote', p_section)
+            self.generateFormatText(node, 'blockquote', p_section)
         
         elif (node.name == "table"):
             self.nestingDepth += 1
             self.tableCounts[self.nestingDepth] = TableCount( ) #{ 'column': 0, 'row': 0 }
             p_section = self.generateSection(self.TYPE_TABLE, p_section)
-            nodeText = self.parseChildren(node, p_section)
-            self.setSectionText(p_section, nodeText)
+            self.parseChildren(node, p_section)
+            self.saveSections[p_section].text = self.useNodeText()
             self.nestingDepth -= 1
             
         elif (node.name == "thead" or node.name == "tbody"):
@@ -221,29 +229,28 @@ class WikiHtmlParser:
 
         elif (node.name == "th" or node.name == "td"):
             p_section = self.generateSection(self.TYPE_TABLE_CELL, p_section)
-            cell_text = self.parseChildren(node, p_section)
+            self.parseChildren(node, p_section)
             
             column_span = int(node.attrs['colspan']) if 'colspan' in node.attrs and node.attrs['colspan'].isdigit() else 1
             row_span = int(node.attrs['rowspan']) if 'rowspan' in node.attrs and node.attrs['rowspan'].isdigit() else 1
-            self.saveSections[p_section].text = cell_text
+            self.saveSections[p_section].text = self.useNodeText()
             self.saveSections[p_section].column_span = column_span
             self.saveSections[p_section].row_span = row_span
             self.saveSections[p_section].row = self.tableCounts[self.nestingDepth].row
             self.saveSections[p_section].column = self.tableCounts[self.nestingDepth].column
             self.saveSections[p_section].format = node.name
-
-
             self.tableCounts[self.nestingDepth].column += 1
-            
+
         elif (node.name == "caption"):
-            self.caption = self.parseChildren(node, p_section)
+            self.parseChildren(node, p_section)
+            self.caption = self.useNodeText()
 
         elif (node.name == "img"):
-            return ""
+            return
         else :
-            return ""
+            return   
         
-        return ""
+        return
 
     def parseEvents(self) -> None:
         """

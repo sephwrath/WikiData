@@ -248,7 +248,7 @@ def parse_article(article_id : int, line : str, mycursor : cursor.MySQLCursor, m
         row_idx, column_idx, row_span, column_span, format, text) 
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
     insert_article_section_ext_text = "INSERT INTO article_section_ext_text (article_id, section_id, count_id, text) values (%s, %s, %s, %s)"
-    insert_article_section_format = "INSERT INTO article_section_format (article_id, section_id, format, start_pos, end_pos, link) values (%s, %s, %s, %s, %s);"
+    insert_article_section_format = "INSERT INTO article_section_format (article_id, section_id, format, start_pos, end_pos, link) values (%s, %s, %s, %s, %s, %s);"
 
     # timing variables
     t_s = 0
@@ -284,7 +284,7 @@ def parse_article(article_id : int, line : str, mycursor : cursor.MySQLCursor, m
         # split the section text into chunks for saving in the database
         section_text = section.text
         section_chunks = []
-        if section_text == "":
+        if not section_text or section_text == "":
             section_chunks.append("")
         else:
             while section_text:

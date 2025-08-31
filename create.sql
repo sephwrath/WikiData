@@ -79,7 +79,7 @@ CREATE TABLE `article_section_format` (
     `start_pos` int NOT NULL, -- the index into the text where the link starts
     `end_pos` int NOT NULL, -- the index into the text where the link ends
     `format` varchar(64) NOT NULL,
-    `link` varchar(1000) NOT NULL,
+    `link` varchar(1000),
     PRIMARY KEY (`id`),
     INDEX `article_section_format_id_idx` (`article_id`),
     FOREIGN KEY (article_id) REFERENCES article(ID),
