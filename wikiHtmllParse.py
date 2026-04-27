@@ -6,6 +6,16 @@ import spacy, re
 
 @dataclass
 class Formatt:
+    """
+    Represents a formatted section of an article.
+
+    Attributes:
+        section (int): The section number within the article.
+        format (str): The format type applied to the section.
+        article (str): If this is a link variable contains the text of the url otherwise None.
+        start (int): The starting index of the formatted section within the section text.
+        end (int): The ending index of the formatted section within the section text.
+    """
     section: int
     format: str
     article: str
@@ -14,6 +24,13 @@ class Formatt:
 
 @dataclass 
 class TableCount:
+    """
+    Represents the count of columns and rows in a table.
+
+    Attributes:
+        column (int): The number of columns in the table.
+        row (int): The number of rows in the table.
+    """
     column: int = 0
     row: int = 0
 

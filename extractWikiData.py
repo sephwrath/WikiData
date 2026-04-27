@@ -16,8 +16,6 @@ sys.path.append("./date-finder/dt_rd_parser")
 
 from dt_rd_parser.timeParser import TimeParser
 
-
-
 ALGORYTHM_UPDATE_DATE = dt.datetime.strptime('2024-12-27', '%Y-%m-%d')
 
 time_parser = TimeParser()
@@ -182,7 +180,7 @@ def write_article_lines_to_db(line : str, dump_id : int, dump_idx : int, mycurso
 
 
         mydb.commit()
-    except mysql.connector.Error as err:
+    except connection.Error as err:
         print("Mysql error: {}".format(err))
 
     t_e = time.time()
@@ -420,6 +418,7 @@ def parse_section_events(article_id : int, section_id : int, section_text : str,
                          mycursor : cursor.MySQLCursor, wikiHtmlParser : WikiHtmlParser):
     insert_parsed_event = "INSERT INTO parsed_event (article_id, section_id, start_date, end_date, date_text, start_pos, end_pos, display_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
     update_section = "UPDATE article_section SET is_parsed = 'Y' WHERE article_id = %s and section_id = %s"
+    # reset the section events before parsing to avoid duplicates if we need to re-parse
     wikiHtmlParser.sectionEvents = []
     wikiHtmlParser.extract_events_spacy(section_text, section_id)
 
@@ -436,25 +435,54 @@ def parse_section_events(article_id : int, section_id : int, section_text : str,
 
     return wikiHtmlParser.sectionEvents
 
+def get_missing_sections(article_id: int, last_section_id: int, cursor : cursor.MySQLCursor):
+    select_article_section = """select article_id, section_id from article_section 
+        where article_id = %s and section_id > %s and is_parsed is not null"""
+    cursor.execute(select_article_section, (article_id, last_section_id))
+    return cursor.fetchall()
+
 def get_article_search_matches(search : str, max_results : int, cursor : cursor.MySQLCursor):
     if search == "":
         return []
-    if '%' not in search:
-        search = search + '%'
+    #if '%' not in search:
+    #    search = search + '*'
 
-    #search_articles = """SELECT a.id, title, url, redirect, no_dates, wiki_update_ts, err
-    #    FROM article a
-    #    WHERE title like %s
-    #    LIMIT %s"""
-    search_articles= """select art.title as sub_title,
-            case when rdr.id is not null then rdr.id else art.id end as id,
-            case when rdr.title is not null then rdr.title else art.title end as title,
-            case when rdr.`description` is not null then rdr.`description` else art.`description` end as `description`
-        from article as art
-        left outer join article as rdr  on art.redirect = rdr.title
-        where art.title like %s limit %s"""
-    cursor.execute(search_articles, (search, max_results))
-    return cursor.fetchall()
+    #search_articles = """    
+    # (select COALESCE(rdr.id, art.id) AS id,
+    #             COALESCE(rdr.title, art.title) AS title,
+    #             COALESCE(rdr.description, art.description) AS description
+    #         from article as art
+    #             left outer join article as rdr  on art.redirect = rdr.title
+    #         where art.title like %s limit %s)
+    #         union
+    #         (select distinct COALESCE(rdr.id, art.id) AS id,
+    #             COALESCE(rdr.title, art.title) AS title,
+    #             COALESCE(rdr.description, art.description) AS description
+    #         from article as art
+    #         left outer join article as rdr  on art.redirect = rdr.title
+            
+    #         WHERE MATCH(art.title_srch) AGAINST (%s IN BOOLEAN MODE)
+    #         limit %s);"""
+    search_articles= """(select COALESCE(rdr.id, art.id) AS id,
+                COALESCE(rdr.title, art.title) AS title,
+                COALESCE(rdr.description, art.description) AS description
+            from article as art
+                left outer join article as rdr  on art.redirect = rdr.title
+            where art.title like %s limit %s)
+            union
+            (select id, title, description from (
+				select distinct COALESCE(rdr.id, art.id) AS id,
+					COALESCE(rdr.title, art.title) AS title,
+					COALESCE(rdr.description, art.description) AS description,
+					MATCH(art.title_srch) AGAINST (%s IN NATURAL LANGUAGE MODE) AS score
+				from article as art
+				left outer join article as rdr  on art.redirect = rdr.title
+				WHERE MATCH(art.title_srch) AGAINST (%s IN NATURAL LANGUAGE MODE)
+				ORDER BY score DESC
+				limit %s) as st);"""
+    cursor.execute(search_articles, (search + '%', max_results, search, search, max_results))
+    results = cursor.fetchall()
+    return results
 
 
 if __name__ == "__main__":

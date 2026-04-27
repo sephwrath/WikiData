@@ -38,7 +38,7 @@ CREATE TABLE `article` (
      FOREIGN KEY (dump_file_id) REFERENCES dump_file(ID)
 );
 
-ALTER TABLE test ADD FULLTEXT INDEX `fulltext`(title_srch);
+ALTER TABLE article ADD FULLTEXT INDEX `fulltext`(title_srch);
 
 CREATE TABLE `article_section` (
     `article_id` int unsigned NOT NULL,
