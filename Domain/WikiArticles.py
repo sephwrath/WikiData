@@ -241,21 +241,8 @@ class wikidateExtractor:
 
         return (article, article_sections, article_links, article_events)
 
-    def extract_remaining_article_sections_by_id(article_id : int, cursor : cursor.MySQLCursor):
-        select_article_section = "select article_id, section_id, text from article_section where article_id = %s and is_parsed is null"
-        select_article_section_ext_text = """SELECT aset.article_id as article_id, aset.section_id, aset.count_id, aset.text
-            FROM article_section_ext_text aset
-            inner join article_section asect on aset.article_id = asect.article_id and aset.section_id = asect.section_id
-            where asect.is_parsed is null and aset.article_id = %s"""
-        
-        cursor.execute(select_article_section, (article_id,))
-        remaining_sections = cursor.fetchall()
-        ext_text = cursor.execute(select_article_section_ext_text, (article_id,))
-        remaining_ext_text = cursor.fetchall()
-        for ext_text in remaining_ext_text:
-            section = next(filter(lambda s: s['section_id'] == ext_text['section_id'], remaining_sections), None)
-            if section is not None:
-                section.text = section['text'] + ext_text['text']
+    def extract_remaining_article_sections_by_id(self, article_id : int):
+        remaining_sections = self.dbadapter.get_article_sections_unparsed(article_id)
         return remaining_sections
 
     def parse_section_events(self,article_id : int, section_id : int, section_text : str):

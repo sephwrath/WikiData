@@ -231,11 +231,14 @@ class MySQLTemporalAdapter:
         select_article_section = "select * from article_section where article_id = %s"
         select_article_section_ext_text = "select * from article_section_ext_text where article_id = %s"
 
-        self.cursor.execute(select_article_section_ext_text, (article_id,))
-        article_ext_text = self.cursor.fetchall()
-
         self.cursor.execute(select_article_section, (article_id,))
-        rows = self.cursor.fetchall()
+        remaining_sections = self.cursor.fetchall()
+        ext_text = self.cursor.execute(select_article_section_ext_text, (article_id,))
+        remaining_ext_text = self.cursor.fetchall()
+        for ext_text in remaining_ext_text:
+            section = next(filter(lambda s: s['section_id'] == ext_text['section_id'], remaining_sections), None)
+            if section is not None:
+                section.text = section['text'] + ext_text['text']
 
         return [
             ArticleSection(
@@ -251,26 +254,34 @@ class MySQLTemporalAdapter:
                 format=row[9],
                 text=row[10]
             )
-            for row in rows
+            for row in remaining_sections
         ]
     
     def get_article_sections_unparsed(self, article_id: int) -> List[ArticleSection]:
+        # TODO
         select_article_section = "select article_id, section_id, text from article_section where article_id = %s and is_parsed is null"
         select_article_section_ext_text = """SELECT aset.article_id as article_id, aset.section_id, aset.count_id, aset.text
             FROM article_section_ext_text aset
             inner join article_section asect on aset.article_id = asect.article_id and aset.section_id = asect.section_id
             where asect.is_parsed is null and aset.article_id = %s"""
+        
         self.cursor.execute(select_article_section, (article_id,))
-        row = self.cursor.fetchone()
+        remaining_sections = self.cursor.fetchall()
+        ext_text = self.cursor.execute(select_article_section_ext_text, (article_id,))
+        remaining_ext_text = self.cursor.fetchall()
+        for ext_text in remaining_ext_text:
+            section = next(filter(lambda s: s['section_id'] == ext_text['section_id'], remaining_sections), None)
+            if section is not None:
+                section.text = section['text'] + ext_text['text']
 
-        if not row:
-            return None
-
-        return ArticleSection(
-            article_id=row[0],
-            section_id=row[1],
-            text=row[2]
-        )
+        return [
+            ArticleSection(
+                article_id=row[0],
+                section_id=row[1],
+                text=row[10]
+            )
+            for row in remaining_sections
+        ]
 
     def save_article_section(self, article_section: ArticleSection):
         insert_article_section = """INSERT INTO article_section (article_id, section_id, tag, ext_text_count, parent_section_id, 
@@ -344,7 +355,14 @@ class MySQLTemporalAdapter:
         ]
     
     def save_article_section_events(self, parsed_events: List[ParsedEvent]):
-        pass
+        insert_parsed_event = """INSERT INTO parsed_event (article_id, section_id, 
+            start_date, end_date, date_text, start_pos, end_pos, display_text) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+        self.cursor.executemany(insert_parsed_event, [
+            (pe.article_id, pe.section_id, pe.start_date, pe.end_date, pe.date_text, pe.start_pos, pe.end_pos, pe.display_text)
+            for pe in parsed_events
+        ])
+
 
     def update_article_section_parse_status(self, article_id: int, section_id: int, is_parsed: bool):
         update_section = "UPDATE article_section SET is_parsed = 'Y' WHERE article_id = %s and section_id = %s"
