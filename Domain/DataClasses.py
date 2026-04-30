@@ -20,6 +20,8 @@ class DumpProgress:
     dump_index: Optional[int]
 
 
+
+
 # -------------------------
 # article
 # -------------------------
@@ -58,17 +60,6 @@ class ArticleSection:
     is_parsed: Optional[str]  # char(1)
 
 
-# -------------------------
-# article_section_link
-# -------------------------
-@dataclass
-class ArticleSectionLink:
-    id: int
-    article_id: int
-    section_id: int
-    start_pos: int
-    end_pos: int
-    link: str
 
 
 # -------------------------

@@ -58,18 +58,6 @@ CREATE TABLE `article_section` (
     FOREIGN KEY (article_id) REFERENCES article(ID)
 );
 
-CREATE TABLE `article_section_link` (
-    `id` int unsigned NOT NULL AUTO_INCREMENT,
-    `article_id` int unsigned NOT NULL,
-    `section_id` int unsigned NOT NULL,
-    `start_pos` int NOT NULL, -- the index into the text where the link starts
-    `end_pos` int NOT NULL, -- the index into the text where the link ends
-    `link` varchar(1000) NOT NULL,
-    PRIMARY KEY (`id`),
-    INDEX `article_section_link_id_idx` (`article_id`),
-    FOREIGN KEY (article_id) REFERENCES article(ID),
-    FOREIGN KEY (article_id, section_id) REFERENCES article_section(article_id, `section_id`)
-);
 
 
 CREATE TABLE `article_section_format` (
