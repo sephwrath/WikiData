@@ -4,11 +4,24 @@ from datetime import datetime
 
 
 # -------------------------
+# dump
+# -------------------------
+@dataclass
+class Dump:
+    id: int
+    file_name: str
+    file_path: str
+    date: datetime
+    current: bool
+
+
+# -------------------------
 # dump_file
 # -------------------------
 @dataclass
 class DumpFile:
     id: int
+    dump_id: int
     file_name: str
     tar_info: bytes
     offset: int
@@ -34,11 +47,13 @@ class Article:
     update: datetime
     dump_file_id: Optional[int]
     dump_idx: Optional[int]
+    dump_id: Optional[int]
     url: str
     redirect: Optional[str]
     no_dates: Optional[bool]
     wiki_update_ts: Optional[datetime]
     err: Optional[str]
+    access_count: Optional[int]
 
 
 # -------------------------

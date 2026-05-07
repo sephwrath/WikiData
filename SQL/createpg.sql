@@ -5,14 +5,24 @@ DROP TABLE IF EXISTS article_section_format CASCADE;
 DROP TABLE IF EXISTS article_section CASCADE;
 DROP TABLE IF EXISTS article CASCADE;
 DROP TABLE IF EXISTS dump_file CASCADE;
+DROP TABLE IF EXISTS dump CASCADE;
 
+
+CREATE TABLE dump (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    file_name VARCHAR NOT NULL,
+    file_path TEXT NOT NULL,
+    extract_date TIMESTAMP NOT NULL,
+    current BOOLEAN NOT NULL,
+    UNIQUE (file_name)
+);
 
 -- =========================
 -- dump_file
 -- =========================
 CREATE TABLE dump_file (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    file_name VARCHAR(400) NOT NULL,
+    file_name VARCHAR NOT NULL,
     tar_info BYTEA NOT NULL,
     file_offset BIGINT NOT NULL,
     offset_data BIGINT NOT NULL,
@@ -25,17 +35,19 @@ CREATE TABLE dump_file (
 -- =========================
 CREATE TABLE article (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    title VARCHAR(400) NOT NULL UNIQUE,
-    title_srch VARCHAR(400),
-    description VARCHAR(1000),
+    title VARCHAR NOT NULL UNIQUE,
+    title_srch VARCHAR,
+    description VARCHAR,
     file_update TIMESTAMP NOT NULL,
     dump_file_id INTEGER,
     dump_idx INTEGER,
-    url VARCHAR(600) NOT NULL,
-    redirect VARCHAR(600),
+    dump_id INTEGER,
+    url VARCHAR NOT NULL,
+    redirect VARCHAR,
     no_dates BOOLEAN,
     wiki_update_ts TIMESTAMP,
-    err VARCHAR(30),
+    access_count INTEGER,
+    err VARCHAR,
 
     CONSTRAINT fk_article_dump_file
         FOREIGN KEY (dump_file_id)
@@ -76,10 +88,10 @@ CREATE TABLE article_section (
     column_idx INTEGER,
     row_span INTEGER,
     column_span INTEGER,
-    tag VARCHAR(40) NOT NULL,
-    format VARCHAR(200),
-    text VARCHAR(15000),
-    is_parsed CHAR(1),
+    tag VARCHAR NOT NULL,
+    format VARCHAR,
+    text VARCHAR,
+    is_parsed BOOLEAN,
 
     PRIMARY KEY (article_id, section_id),
 
@@ -99,8 +111,8 @@ CREATE TABLE article_section_format (
     section_id INTEGER NOT NULL,
     start_pos INTEGER NOT NULL,
     end_pos INTEGER NOT NULL,
-    format VARCHAR(64) NOT NULL,
-    link VARCHAR(1000),
+    format VARCHAR NOT NULL,
+    link VARCHAR,
 
     CONSTRAINT fk_format_article
         FOREIGN KEY (article_id)
@@ -116,27 +128,6 @@ CREATE TABLE article_section_format (
 CREATE INDEX idx_format_article_id
     ON article_section_format(article_id);
 
-CREATE TABLE article_section_ext_text (
-    article_id INTEGER NOT NULL,
-    section_id INTEGER NOT NULL,
-    count_id INTEGER NOT NULL,
-    text VARCHAR(15000),
-
-    PRIMARY KEY (article_id, section_id, count_id),
-
-    CONSTRAINT fk_ext_article
-        FOREIGN KEY (article_id)
-        REFERENCES article(id)
-        ON DELETE CASCADE,
-
-    CONSTRAINT fk_ext_section
-        FOREIGN KEY (article_id, section_id)
-        REFERENCES article_section(article_id, section_id)
-        ON DELETE CASCADE
-);
-
-CREATE INDEX idx_ext_article_id
-    ON article_section_ext_text(article_id);
 
 CREATE TABLE parsed_event (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -145,10 +136,10 @@ CREATE TABLE parsed_event (
     start_date BIGINT,
     end_date BIGINT,
     parse_status INTEGER,
-    date_text VARCHAR(200),
+    date_text VARCHAR,
     start_pos INTEGER NOT NULL,
     end_pos INTEGER NOT NULL,
-    display_text VARCHAR(500),
+    display_text VARCHAR,
 
     CONSTRAINT fk_event_article
         FOREIGN KEY (article_id)

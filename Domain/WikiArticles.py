@@ -10,10 +10,10 @@ from bs4 import BeautifulSoup
 from WikiData.Domain.DataClasses import DumpFile, DumpProgress, Article, ArticleSection, ArticleSectionLink, ArticleSectionFormat, ParsedEvent
 from WikiData.Domain.Errors import DatabaseError, DumpFileError,  ArticleNotFoundError
 from WikiData.Domain.TemporalDBPort import TemporalDBPort
-from WikiData.wikiHtmllParse import WikiHtmlParser
+from WikiData.Domain.WikiHtmllParse import WikiHtmlParser
 from WikiData.Domain.WikiDump import WikiDump
 
-class wikidateExtractor:
+class WikiArticles:
 
     def __init__(self, temporal_adapter : TemporalDBPort, wiki_dump : WikiDump, wikiHtmlParser : WikiHtmlParser):
         self.dbadapter = temporal_adapter

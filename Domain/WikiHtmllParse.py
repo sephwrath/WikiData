@@ -1,5 +1,5 @@
 from typing import Any, Self
-from dateparser import parse
+#from dateparser import parse
 from bs4 import BeautifulSoup, Tag
 from dataclasses import dataclass
 import spacy, re

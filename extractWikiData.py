@@ -2,7 +2,7 @@ import tarfile
 from mysql.connector import (connection, cursor)
 #from mysql import MySQLConnection, MySQLCursor, MySQLCursorDict
 import json
-from .wikiHtmllParse import WikiHtmlParser, NodeSection, Event, Formatt
+from .Domain.wikiHtmllParse import WikiHtmlParser, NodeSection, Event, Formatt
 import html2text
 from bs4 import BeautifulSoup
 import re

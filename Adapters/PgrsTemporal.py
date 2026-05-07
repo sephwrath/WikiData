@@ -1,110 +1,129 @@
 from dataclasses import fields
-from mysql.connector import connection, cursor, pooling
 from typing import List
+import psycopg
+#from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+
 from WikiData.Domain.TemporalDBPort import TemporalDBPort
-from WikiData.Domain.DataClasses import ArticleSectionFormat, DumpFile, Article, ArticleSection, ArticleSectionLink, DumpProgress, ParsedEvent
+from WikiData.Domain.DataClasses import (
+    ArticleSectionFormat, DumpFile, Article,
+    ArticleSection, ParsedEvent, DumpProgress, Dump
+)
 
-class MySQLTemporalAdapter(TemporalDBPort):
 
-    def __init__(self, host: str, user: str, password: str, database: str, pool_name: str, pool_size: int):
-        dbconfig = {
-            "database": database,
-            "user": user,
-            "password": password,
-            "host": host
-        }
-        self.cnxPool : pooling.MySQLConnectionPool = pooling.MySQLConnectionPool(pool_name=pool_name, pool_size=pool_size, **dbconfig)
-        
+class PostgresTemporalAdapter(TemporalDBPort):
+
+    def __init__(self, dsn: str, pool_size: int = 5):
+        self.pool = ConnectionPool(conninfo=dsn, max_size=pool_size)
+        self.connection = None
+        self.cursor = None
+
     def start(self):
-        self.connection = self.cnxPool.get_connection()
-        self.cursor : cursor.MySQLCursorDict = self.connection.cursor(dictionary=True)
-        #self.connection.start_transaction()
-        return
+        self.connection = self.pool.getconn()
+        self.cursor = self.connection.cursor()
 
     def end(self):
-        if self.connection.is_connected():
-            self.commit()
+        try:
+            self.connection.commit()
+        finally:
             self.cursor.close()
-            self.connection.close()
+            self.pool.putconn(self.connection)
 
     def commit(self):
-        if self.connection.is_connected():
-            self.connection.commit()
+        self.connection.commit()
 
+
+    # ------------------------
+    # Utility
+    # ------------------------
+    @staticmethod
     def map_row_to_dataclass(cls, row: dict):
         field_names = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in row.items() if k in field_names})
-
-    # Dump File Methods
-    def get_dump_file_by_name(self, file_name: str) -> DumpFile | None:
+    
+    # ------------------------
+    # Dump
+    # ------------------------
+    def create_new_dump(self, Dump: Dump) -> DumpFile:
         sql = """
-            SELECT id, file_name, tar_info, offset, offset_data
-            FROM dump_file
-            WHERE file_name = %s
+            INSERT INTO dump (file_name, file_path, extract_date, current)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
         """
-        self.cursor.execute(sql, (file_name,))
+        self.cursor.execute(sql, (Dump.file_name, Dump.file_path, Dump.date, Dump.current))
+        new_id = self.cursor.fetchone()["id"]
+
+        return DumpFile(
+            id=new_id,
+            dump_id=new_id,
+            file_name=Dump.file_name,
+            tar_info=b'',
+            offset=0,
+            offset_data=0
+        )
+    
+    def set_current_dump(self, dump_file_id: int) -> None:
+        sql_unset_current = "UPDATE dump SET current = FALSE WHERE current = TRUE"
+        sql_set_current = "UPDATE dump SET current = TRUE WHERE id = %s"
+
+        self.cursor.execute(sql_unset_current)
+        self.cursor.execute(sql_set_current, (dump_file_id,))
+
+    def get_current_dump(self) -> Dump | None:
+        sql = "SELECT id, file_name, file_path, extract_date, current FROM dump WHERE current = TRUE"
+        self.cursor.execute(sql)
         row = self.cursor.fetchone()
 
         if not row:
             return None
 
-        return DumpFile(
-            id=row[0],
-            file_name=row[1],
-            tar_info=row[2],
-            offset=row[3],
-            offset_data=row[4],
+        return Dump(
+            id=row["id"],
+            file_name=row["file_name"],
+            file_path=row["file_path"],
+            date=row["extract_date"],
+            current=row["current"]
         )
-    
+
+    # ------------------------
+    # Dump File
+    # ------------------------
+    def get_dump_file_by_name(self, file_name: str) -> DumpFile | None:
+        sql = """
+            SELECT id, file_name, tar_info, "offset", offset_data
+            FROM dump_file
+            WHERE file_name = %s
+        """
+        self.cursor.execute(sql, (file_name,))
+        row = self.cursor.fetchone()
+        return DumpFile(**row) if row else None
+
     def get_dump_files_from_id(self, start_id: int) -> List[DumpFile]:
         sql = """
-            SELECT id, file_name, tar_info, offset, offset_data
+            SELECT id, file_name, tar_info, "offset", offset_data
             FROM dump_file
             WHERE id >= %s
             ORDER BY id
         """
         self.cursor.execute(sql, (start_id,))
-        rows = self.cursor.fetchall()
+        return [DumpFile(**row) for row in self.cursor.fetchall()]
 
-        return [
-            DumpFile(
-                id=row[0],
-                file_name=row[1],
-                tar_info=row[2],
-                offset=row[3],
-                offset_data=row[4],
-            )
-            for row in rows
-        ]
-
-    def insert_dump_file(
-        self,
-        file_name: str,
-        tar_info: bytes,
-        offset: int,
-        offset_data: int
-    ) -> DumpFile:
+    def insert_dump_file(self, dump_file: DumpFile) -> DumpFile:
         sql = """
-            INSERT INTO dump_file (file_name, tar_info, offset, offset_data)
-            VALUES (%s, _binary %s, %s, %s)
+            INSERT INTO dump_file (file_name, tar_info, "offset", offset_data)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
         """
-        self.cursor.execute(sql, (file_name, tar_info, offset, offset_data))
+        self.cursor.execute(sql, (dump_file.file_name, dump_file.tar_info, dump_file.offset, dump_file.offset_data))
+        new_id = self.cursor.fetchone()["id"]
 
-        new_id = self.cursor.lastrowid
-
-        return DumpFile(
-            id=new_id,
-            file_name=file_name,
-            tar_info=tar_info,
-            offset=offset,
-            offset_data=offset_data,
-        )
-
-    def update_dump_file(self, dump_file_id: int, tar_info: bytes, offset: int, offset_data: int) -> DumpFile:
+        return dump_file._replace(id=new_id)
+    
+    def update_dump_file(self, dump_file_id, tar_info, offset, offset_data) -> DumpFile:
         sql = """
             UPDATE dump_file
-            SET tar_info = _binary %s,
-                offset = %s,
+            SET tar_info = %s,
+                "offset" = %s,
                 offset_data = %s
             WHERE id = %s
         """
@@ -112,24 +131,19 @@ class MySQLTemporalAdapter(TemporalDBPort):
 
         return DumpFile(
             id=dump_file_id,
-            file_name="",  # unknown here unless re-fetched
+            file_name="",
             tar_info=tar_info,
             offset=offset,
             offset_data=offset_data,
         )
 
-    def upsert_dump_file(self, file_name: str, tar_info: bytes, offset: int, offset_data: int) -> DumpFile:
-        existing = self.get_dump_file_by_name(file_name)
-
-        if existing:
-            return self.update_dump_file(existing.id, tar_info, offset, offset_data)
-        else:
-            return self.insert_dump_file(file_name, tar_info, offset, offset_data)
-        
+    # ------------------------
+    # Dump progress
+    # ------------------------
     def get_last_dump_progress(self) -> DumpProgress:
         sql = """
             SELECT MAX(dump_file_id) AS df_id,
-                MAX(dump_idx) AS df_idx
+                   MAX(dump_idx) AS df_idx
             FROM article
             WHERE dump_file_id = (
                 SELECT MAX(dump_file_id) FROM article
@@ -138,13 +152,74 @@ class MySQLTemporalAdapter(TemporalDBPort):
         self.cursor.execute(sql)
         row = self.cursor.fetchone()
 
-        if not row or row[0] is None:
+        if not row or row["df_id"] is None:
             return DumpProgress(dump_file_id=None, dump_index=None)
 
         return DumpProgress(
-            dump_file_id=row[0],
-            dump_index=row[1],
+            dump_file_id=row["df_id"],
+            dump_index=row["df_idx"]
         )
+
+    # ------------------------
+    # Article
+    # ------------------------
+    def save_article(self, article: Article):
+        sql = """
+            INSERT INTO article (
+                id, title, title_srch, description, file_update,
+                dump_file_id, dump_idx, url, redirect,
+                no_dates, wiki_update_ts, err
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                title_srch = EXCLUDED.title_srch,
+                description = EXCLUDED.description,
+                file_update = EXCLUDED.file_update,
+                dump_file_id = EXCLUDED.dump_file_id,
+                dump_idx = EXCLUDED.dump_idx,
+                url = EXCLUDED.url,
+                redirect = EXCLUDED.redirect,
+                no_dates = EXCLUDED.no_dates,
+                wiki_update_ts = EXCLUDED.wiki_update_ts,
+                err = EXCLUDED.err
+        """
+        self.cursor.execute(sql, (
+            article.id, article.title, article.title_srch,
+            article.description, article.update,
+            article.dump_file_id, article.dump_idx,
+            article.url, article.redirect,
+            article.no_dates, article.wiki_update_ts, article.err
+        ))
+
+    # ------------------------
+    # Sections (example)
+    # ------------------------
+    def get_article_sections(self, article_id: int) -> List[ArticleSection]:
+        sql = "SELECT * FROM article_section WHERE article_id = %s"
+        self.cursor.execute(sql, (article_id,))
+        return [ArticleSection(**row) for row in self.cursor.fetchall()]
+
+    # ------------------------
+    # Events
+    # ------------------------
+    def save_article_section_events(self, parsed_events: List[ParsedEvent]):
+        sql = """
+            INSERT INTO parsed_event (
+                article_id, section_id, start_date, end_date,
+                date_text, start_pos, end_pos, display_text
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        self.cursor.executemany(sql, [
+            (
+                pe.article_id, pe.section_id,
+                pe.start_date, pe.end_date,
+                pe.date_text, pe.start_pos,
+                pe.end_pos, pe.display_text
+            )
+            for pe in parsed_events
+        ])
 
     def get_article_by_id(self, article_id: int) -> Article | None:
         select_article = """select a.id, title, `update`, dump_idx, url, redirect, no_dates, wiki_update_ts, err, 
@@ -285,19 +360,11 @@ class MySQLTemporalAdapter(TemporalDBPort):
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
         section_text = article_section.text
-        section_chunks = []
-        if not section_text or section_text == "":
-            section_chunks.append("")
-        else:
-            while section_text:
-                chunk, section_text = section_text[:14000], section_text[14000:]
-                section_chunks.append(chunk)
 
         self.cursor.execute(insert_article_section, (article_section.article_id, article_section.section_id, article_section.tag, 
-                                                  len(section_chunks) - 1, article_section.parent_section_id,
+                                                 None, article_section.parent_section_id,
                                                   article_section.row_idx, article_section.column_idx, article_section.row_span,
-                                                  article_section.column_span, article_section.format, section_chunks[0]))        
-        self.save_article_section_ext_text(article_section.article_id, article_section.section_id, section_chunks[1:])
+                                                  article_section.column_span, article_section.format, section_text))        
 
     def save_article_section_ext_text(self, article_id: int, section_id: int, ext_text_chunks: List[str]):
         insert_article_section_ext_text = "INSERT INTO article_section_ext_text (article_id, section_id, count_id, text) values (%s, %s, %s, %s)"
